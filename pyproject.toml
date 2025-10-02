@@ -5,7 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 license-files = ["LICENSE"]
-dependencies = []
+dependencies = [
+    "numpy>=2.3.3",
+    "pyqtgraph>=0.13.7",
+    "pyserial>=3.5",
+    "pyside6>=6.9.3",
+]
 
 
 [dependency-groups]
