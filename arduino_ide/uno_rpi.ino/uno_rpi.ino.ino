@@ -1,12 +1,14 @@
+const int SENSOR_PIN = A0;
+const int FULL_SCALE = 1023; // bruk 4095 på 12-bit ADC (f.eks. ESP32)
+
 void setup() {
-  Serial.begin(57600);
-  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.begin(9600);
 }
 
 void loop() {
-  static unsigned long i = 0;
-  Serial.print("HELLO ");
-  Serial.println(i++);
-  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-  delay(100);
+  int sensorValue = analogRead(SENSOR_PIN);
+  Serial.println(sensorValue); // bare send råverdien
+  Serial.print('\t');
+  Serial.println(FULL_SCALE);
+  delay(50);
 }
