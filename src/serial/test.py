@@ -84,9 +84,10 @@ def stream_fn() -> Generator[Any, None, None]:
 
 
 if __name__ == "__main__":
-    port = serial_monitor(open_port("MOCK", stream_fn=stream_fn))
+    port = serial_monitor(open_port("/dev/ttyUSB0", baudrate=9600, timeout=0.1))
+    print("Serial monitor started. Press Ctrl+C to quit.")
 
     while True:
         line = port.readline()
         print(line)
-        time.sleep(0.1)
+        time.sleep(0.005)

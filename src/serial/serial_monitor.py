@@ -86,7 +86,7 @@ class _SerialTee:
 # ---------------- internal: minimal plotting UI -------------
 _CH = 8
 _PAIRS = [(0, 1), (2, 3), (4, 5), (6, 7)]
-_HIST = 2000
+_HIST = 300
 
 
 class _SerialMonitorWidget(QtWidgets.QWidget):

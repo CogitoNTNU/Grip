@@ -12,7 +12,7 @@ class PortAccessor:
         port: str,
         *,
         baudrate: int = 115200,
-        timeout: float = 1.0,
+        timeout: float = 0.05,
         retries: int = 3,
         backoff: float = 0.1,
         **kwargs,

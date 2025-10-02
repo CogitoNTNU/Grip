@@ -27,7 +27,8 @@ class MockPort:
         chunk = self._byte_ify(next(self._source))
         if chunk:
             self._buf.extend(chunk)
-            self._buf.extend(b"\n")
+            if not chunk.endswith(b"\n"):
+                self._buf.extend(b"\n")
 
     def read(self, size: int = 1) -> bytes:
         if size <= 0:
