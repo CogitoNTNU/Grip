@@ -1,5 +1,5 @@
-from mock_port import MockPort
-from port_accessor import PortAccessor
+from src.serial.mock_port import MockPort
+from src.serial.port_accessor import PortAccessor
 
 
 def open_port(name: str, **kwargs):

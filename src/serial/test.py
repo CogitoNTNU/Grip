@@ -1,8 +1,8 @@
 import time
 from typing import Generator, Any
 import random
-from ports import open_port
-from serial_monitor import serial_monitor
+from src.serial.ports import open_port
+from src.serial.serial_monitor import serial_monitor
 
 from collections import deque
 import statistics as stats
@@ -84,7 +84,9 @@ def stream_fn() -> Generator[Any, None, None]:
 
 
 if __name__ == "__main__":
-    port = serial_monitor(open_port("/dev/ttyUSB0", baudrate=9600, timeout=0.1))
+    # port = serial_monitor(open_port("/dev/ttyUSB0", baudrate=9600, timeout=0.1))
+    port = serial_monitor(open_port("MOCK", stream_fn=stream_fn))
+    
     print("Serial monitor started. Press Ctrl+C to quit.")
 
     while True:
