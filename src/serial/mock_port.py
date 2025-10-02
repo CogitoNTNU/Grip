@@ -1,4 +1,4 @@
-from typing import Generator, Any, Callable
+from typing import Any, Callable, Generator
 
 
 class MockPort:
