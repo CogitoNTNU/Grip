@@ -51,6 +51,8 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         sub: Subscription,
         parse_fn_in: Optional[Callable[[bytes], Optional[List[int]]]] = None,
         parse_fn_out: Optional[Callable[[bytes], Optional[List[int]]]] = None,
+        plot_in: bool = True,
+        plot_out: bool = True,
         fs: int = 1000,
     ):
         super().__init__()
@@ -61,6 +63,8 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         self._q: queue.Queue[Any] = sub.queue
         self._parse_in = parse_fn_in or _parse_csv_int
         self._parse_out = parse_fn_out or _parse_csv_int
+        self._plot_in = plot_in
+        self._plot_out = plot_out
 
         root = QtWidgets.QVBoxLayout(self)
         self.status = QtWidgets.QLabel("Waiting for data…")
@@ -75,75 +79,78 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         lyt.setVerticalSpacing(28)
 
         # 1) make two column sub-layouts
-        left = self.glw.addLayout(row=0, col=0)  # pairs
-        right = self.glw.addLayout(row=0, col=1)  # servos
+        if self._plot_in:
+            left = self.glw.addLayout(row=0, col=0)  # pairs
+            self.glw.ci.layout.setColumnStretchFactor(0, 1)
 
-        # optional: columns expand evenly
-        self.glw.ci.layout.setColumnStretchFactor(0, 1)
-        self.glw.ci.layout.setColumnStretchFactor(1, 1)
+        if self._plot_out:
+            right = self.glw.addLayout(row=0, col=1)  # servos
+            self.glw.ci.layout.setColumnStretchFactor(1, 1)
 
         # ---------------- left column: 4 pair plots, each "3 units" tall ----------------
-        PAIR_UNITS = 3
-        self.pair_plots: list[pg.PlotItem] = []
-        self.curves: list[Optional[pg.PlotDataItem]] = [None] * _CH
+        if self._plot_in:
+            PAIR_UNITS = 3
+            self.pair_plots: list[pg.PlotItem] = []
+            self.curves: list[Optional[pg.PlotDataItem]] = [None] * _CH
 
-        for r, (i, j) in enumerate(_PAIRS):
-            p = left.addPlot(row=r, col=0, title=f"Pair {r + 1}")
-            p.titleLabel.item.setPos(0, -12)
-            p.showGrid(x=False, y=True, alpha=0.25)
-            p.setYRange(0, 1023, padding=0)
-            p.enableAutoRange("y", False)
-            p.getViewBox().setLimits(yMin=0, yMax=1024)
+            for r, (i, j) in enumerate(_PAIRS):
+                p = left.addPlot(row=r, col=0, title=f"Pair {r + 1}")
+                p.titleLabel.item.setPos(0, -12)
+                p.showGrid(x=False, y=True, alpha=0.25)
+                p.setYRange(0, 1023, padding=0)
+                p.enableAutoRange("y", False)
+                p.getViewBox().setLimits(yMin=0, yMax=1024)
 
-            if r == len(_PAIRS) - 1:
-                p.setLabel("bottom", "Samples")
-            p.setLabel("left", "Amplitude")
-            for edge in ["top", "right"]:
-                ax = p.getAxis(edge)
-                ax.setStyle(showValues=False)  # hide numbers
-                ax.setTicks([])  # no tick marks
-                ax.setPen(pg.mkPen("w", width=0.5))  # solid white line
-                p.showAxis(edge, True)  # Show edge axis
+                if r == len(_PAIRS) - 1:
+                    p.setLabel("bottom", "Samples")
+                p.setLabel("left", "Amplitude")
+                for edge in ["top", "right"]:
+                    ax = p.getAxis(edge)
+                    ax.setStyle(showValues=False)  # hide numbers
+                    ax.setTicks([])  # no tick marks
+                    ax.setPen(pg.mkPen("w", width=0.5))  # solid white line
+                    p.showAxis(edge, True)  # Show edge axis
 
-            c_i = p.plot(pen=pg.mkPen(width=1))
-            c_j = p.plot(pen=pg.mkPen(width=3))
-            self.pair_plots.append(p)
-            self.curves[i] = c_i
-            self.curves[j] = c_j
+                c_i = p.plot(pen=pg.mkPen(width=1))
+                c_j = p.plot(pen=pg.mkPen(width=3))
+                self.pair_plots.append(p)
+                self.curves[i] = c_i
+                self.curves[j] = c_j
 
-            # give this row 3x weight
-            left.layout.setRowStretchFactor(r, PAIR_UNITS)
+                # give this row 3x weight
+                left.layout.setRowStretchFactor(r, PAIR_UNITS)
 
         # ---------------- right column: 6 servo plots, each "2 units" tall ---------------
-        SERVO_UNITS = 2
-        self.servo_plots: list[pg.PlotItem] = []
-        self.servo_curves: list[pg.PlotDataItem] = []
+        if self._plot_out:
+            SERVO_UNITS = 2
+            self.servo_plots: list[pg.PlotItem] = []
+            self.servo_curves: list[pg.PlotDataItem] = []
 
-        for s in range(_SERVOS):
-            p = right.addPlot(row=s, col=0, title=f"Servo {s + 1}")
-            p.titleLabel.item.setPos(0, -12)
-            p.showGrid(x=False, y=True, alpha=0.25)
-            p.setYRange(0, 127, padding=0)
-            p.enableAutoRange("y", False)
-            p.getViewBox().setLimits(yMin=0, yMax=128)
+            for s in range(_SERVOS):
+                p = right.addPlot(row=s, col=0, title=f"Servo {s + 1}")
+                p.titleLabel.item.setPos(0, -12)
+                p.showGrid(x=False, y=True, alpha=0.25)
+                p.setYRange(0, 127, padding=0)
+                p.enableAutoRange("y", False)
+                p.getViewBox().setLimits(yMin=0, yMax=128)
 
-            p.setLabel("left", "Rotation")
-            for edge in ["top", "right"]:
-                ax = p.getAxis(edge)
-                ax.setStyle(showValues=False)  # hide numbers
-                ax.setTicks([])  # no tick marks
-                ax.setPen(pg.mkPen("w", width=0.5))  # solid white line
-                p.showAxis(edge, True)  # Show edge axis
+                p.setLabel("left", "Rotation")
+                for edge in ["top", "right"]:
+                    ax = p.getAxis(edge)
+                    ax.setStyle(showValues=False)  # hide numbers
+                    ax.setTicks([])  # no tick marks
+                    ax.setPen(pg.mkPen("w", width=0.5))  # solid white line
+                    p.showAxis(edge, True)  # Show edge axis
 
-            if s == _SERVOS - 1:
-                p.setLabel("bottom", "Samples")
+                if s == _SERVOS - 1:
+                    p.setLabel("bottom", "Samples")
 
-            c = p.plot(pen=pg.mkPen(width=2))
-            self.servo_plots.append(p)
-            self.servo_curves.append(c)
+                c = p.plot(pen=pg.mkPen(width=2))
+                self.servo_plots.append(p)
+                self.servo_curves.append(c)
 
-            # give this row 2x weight
-            right.layout.setRowStretchFactor(s, SERVO_UNITS)
+                # give this row 2x weight
+                right.layout.setRowStretchFactor(s, SERVO_UNITS)
 
         # --- data buffers ---
         self.buffers = [deque(maxlen=_HIST) for _ in range(_CH)]
@@ -190,16 +197,18 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         x = np.arange(self.sample_idx - n, self.sample_idx, dtype=float)
 
         # update channel (pairs) curves
-        for ch in range(_CH):
-            if self.curves[ch] is None:
-                continue
-            y = np.fromiter(self.buffers[ch], dtype=float, count=n)
-            self.curves[ch].setData(x, y)
+        if self._plot_in:
+            for ch in range(_CH):
+                if self.curves[ch] is None:
+                    continue
+                y = np.fromiter(self.buffers[ch], dtype=float, count=n)
+                self.curves[ch].setData(x, y)
 
         # update servo curves (same x, hold-last already enforced in buffers)
-        for s in range(_SERVOS):
-            y = np.fromiter(self.servo_buffers[s], dtype=float, count=n)
-            self.servo_curves[s].setData(x, y)
+        if self._plot_out:
+            for s in range(_SERVOS):
+                y = np.fromiter(self.servo_buffers[s], dtype=float, count=n)
+                self.servo_curves[s].setData(x, y)
 
         self.status.setText(f"Samples: {self.sample_idx}")
 
@@ -216,10 +225,10 @@ class SerialMonitorWidget(QtWidgets.QWidget):
             direction = getattr(evt, "direction", None)
             payload = getattr(evt, "data", b"")
 
-            if direction == "in":
+            if direction == "in" and self._plot_in:
                 if self._handle_in(payload):
                     got_in = True
-            elif direction == "out":
+            elif direction == "out" and self._plot_out:
                 self._handle_out(payload)
             else:
                 # Unknown direction; ignore
@@ -264,6 +273,8 @@ def register_monitor(
     fs: int = 1000,
     max_queue: int = 5000,
     title: str = "Serial Monitor",
+    plot_in: bool = True,
+    plot_out: bool = True,
 ) -> MonitorHandle:
     """
     Start the SerialMonitor in its own *thread* where all Qt objects live.
@@ -292,6 +303,8 @@ def register_monitor(
             parse_fn_in=parse_fn_in,
             parse_fn_out=parse_fn_out,
             fs=fs,
+            plot_in=plot_in,
+            plot_out=plot_out,
         )
         w.setWindowTitle(title)
         w.resize(1100, 850)
@@ -337,13 +350,21 @@ def create_monitor_widget(
     parse_fn_out: Optional[Callable[[bytes], Optional[List[int]]]] = None,
     fs: int = 1000,
     max_queue: int = 5000,
+    plot_in: bool = True,
+    plot_out: bool = True,
 ) -> QtWidgets.QWidget:
     """
     Creates and returns a SerialMonitorWidget. Caller must manage QApplication and call .show().
     """
     sub = pa.subscribe(max_queue=max_queue)
     w = SerialMonitorWidget(
-        pa=pa, sub=sub, parse_fn_in=parse_fn_in, parse_fn_out=parse_fn_out, fs=fs
+        pa=pa,
+        sub=sub,
+        parse_fn_in=parse_fn_in,
+        parse_fn_out=parse_fn_out,
+        fs=fs,
+        plot_in=plot_in,
+        plot_out=plot_out,
     )
     w.resize(1100, 850)
     return w

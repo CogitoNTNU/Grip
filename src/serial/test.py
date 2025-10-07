@@ -27,7 +27,7 @@ if __name__ == "__main__":
     pa = PortAccessor(port="MOCK")
     pa.open()
 
-    handle = register_monitor(pa, fs=1000, title="Throughput Monitor")
+    handle = register_monitor(pa, fs=1000, title="Throughput Monitor", plot_out=False)
 
     source = stream()
 
