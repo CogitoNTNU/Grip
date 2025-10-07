@@ -1,7 +1,9 @@
-import serial
 import threading
 import time
+
 from gpiozero import Servo
+
+import serial
 
 # Bruk BCM-numre (de du valgte)
 servos = [Servo(17), Servo(27), Servo(22), Servo(23), Servo(24), Servo(25)]

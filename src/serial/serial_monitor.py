@@ -1,15 +1,15 @@
 # serial_monitor.py
 # deps: PySide6, pyqtgraph, numpy
 
-import time
 import queue
 import threading
+import time
 from collections import deque
-from typing import Callable, Optional, List, Any
+from typing import Any, Callable, List, Optional
 
 import numpy as np
-from PySide6 import QtWidgets, QtCore
 import pyqtgraph as pg
+from PySide6 import QtCore, QtWidgets
 
 
 # ---------------- internal: parse 8-int CSV ----------------
