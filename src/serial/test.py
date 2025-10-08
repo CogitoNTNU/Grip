@@ -7,10 +7,20 @@ from typing import Any, Generator
 
 
 def print_data(event: PortEvent):
+    """
+    Small callback that prints the data from the serial port.
+
+    Args:
+        event (PortEvent): The event that triggered this callback.
+    """
     print(event.data)
 
 
 def stream() -> Generator[Any, None, None]:
+    """
+    Function that simulates a stream of data.
+    """
+
     rng = random.Random()
 
     values = [0] * 6
@@ -24,17 +34,20 @@ def stream() -> Generator[Any, None, None]:
 
 
 if __name__ == "__main__":
+    # Open the MOCK port
     pa = PortAccessor(port="MOCK")
     pa.open()
 
+    # Register the monitor
     handle = register_monitor(pa, fs=1000, title="Throughput Monitor", plot_out=False)
 
+    # Create a stream of data and write it to the port
     source = stream()
-
     for i in range(5000):
         payload = next(source)
         pa.write(payload)
         time.sleep(0.05)
 
+    # Stop the monitor and close the port
     handle.stop()
     pa.close()

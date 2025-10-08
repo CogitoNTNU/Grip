@@ -5,6 +5,20 @@ from typing import Any, Callable, Generator
 
 
 def default_stream() -> Generator[Any, None, None]:
+    """
+    Generate a stream of pseudo-random data sequences based on dynamic constraints.
+
+    Each sequence is a comma-separated string of eight integers representing the
+    env and raw output from the four EMG sensors. The string is formatted as:
+    ENV0,RAW0,ENV1,RAW1,ENV2,RAW2,ENV3,RAW3
+
+    Returns:
+        Generator: A generator object yielding strings that encapsulate two sets
+        of computed integer values (`b_emit` and `c`) for each of four channels.
+
+    Raises:
+        N/A
+    """
     rng = random.Random()
 
     # --- fixed settings ---

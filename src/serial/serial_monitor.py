@@ -16,6 +16,12 @@ from src.serial.port_accessor import PortAccessor, Subscription
 
 # ---------------- internal: parsers ----------------
 def _parse_csv_int(line: bytes) -> Optional[List[int]]:
+    """
+    Parse a CSV-encoded int sequence.
+
+    Args:
+        line (bytes): The line to parse.
+    """
     parts = line.decode("utf-8", "ignore").strip().split(",")
     try:
         return [int(p) for p in parts]
@@ -30,6 +36,7 @@ _PAIRS = [(0, 1), (2, 3), (4, 5), (6, 7)]
 _HIST = 300  # history window (samples)
 
 
+# TODO: Rewrite to use event.t as x axis instead of sample index for consistency.
 class SerialMonitorWidget(QtWidgets.QWidget):
     """
     Live monitor for a PortAccessor subscription.
@@ -53,19 +60,35 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         parse_fn_out: Optional[Callable[[bytes], Optional[List[int]]]] = None,
         plot_in: bool = True,
         plot_out: bool = True,
-        fs: int = 1000,
     ):
+        """
+        Initialize the widget.
+
+        Args:
+            pa (PortAccessor): The port accessor.
+            sub (Subscription): The subscription to monitor.
+            parse_fn_in (Optional[Callable[[bytes], Optional[List[int]]]]): Function to parse 'in' frames.
+            parse_fn_out (Optional[Callable[[bytes], Optional[List[int]]]]): Function to parse 'out' frames.
+            plot_in (bool): Whether to plot 'in' frames.
+            plot_out (bool): Whether to plot 'out' frames.
+        """
         super().__init__()
         self.setWindowTitle("Serial Monitor")
-        self.fs = fs
         self._pa = pa
         self._sub = sub
+
+        # Fetch event queue from the subscription
         self._q: queue.Queue[Any] = sub.queue
+
+        # Bind parse functions
         self._parse_in = parse_fn_in or _parse_csv_int
         self._parse_out = parse_fn_out or _parse_csv_int
+
+        # Which plots to show?
         self._plot_in = plot_in
         self._plot_out = plot_out
 
+        # Initialize GUI
         root = QtWidgets.QVBoxLayout(self)
         self.status = QtWidgets.QLabel("Waiting for data…")
         root.addWidget(self.status)
@@ -78,78 +101,111 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         lyt.setHorizontalSpacing(24)
         lyt.setVerticalSpacing(28)
 
-        # 1) make two column sub-layouts
-        if self._plot_in:
-            left = self.glw.addLayout(row=0, col=0)  # pairs
-            self.glw.ci.layout.setColumnStretchFactor(0, 1)
-
-        if self._plot_out:
-            right = self.glw.addLayout(row=0, col=1)  # servos
-            self.glw.ci.layout.setColumnStretchFactor(1, 1)
-
         # ---------------- left column: 4 pair plots, each "3 units" tall ----------------
         if self._plot_in:
-            PAIR_UNITS = 3
+            # Create a sub-layout in the left column (col=0) to hold the pair plots.
+            left = self.glw.addLayout(row=0, col=0)  # pairs
+            # Give the left column equal stretch weight as the right (set individually per col).
+            self.glw.ci.layout.setColumnStretchFactor(0, 1)
+
+            PAIR_UNITS = 3  # row stretch weight for each pair plot row
             self.pair_plots: list[pg.PlotItem] = []
+            # One curve handle per input channel (i and j will write into these slots).
             self.curves: list[Optional[pg.PlotDataItem]] = [None] * _CH
 
             for r, (i, j) in enumerate(_PAIRS):
+                # Add a plot widget for the r-th pair in the left sub-layout.
                 p = left.addPlot(row=r, col=0, title=f"Pair {r + 1}")
+
+                # Move the title a bit up so it doesn't overlap the plot area.
                 p.titleLabel.item.setPos(0, -12)
+
+                # Show only horizontal grid lines (y), make them faint.
                 p.showGrid(x=False, y=True, alpha=0.25)
+
+                # Fix the y-axis range to 10-bit ADC values (0..1023) with no padding.
                 p.setYRange(0, 1023, padding=0)
                 p.enableAutoRange("y", False)
+
+                # Also clamp panning/zooming so users can’t go outside [0, 1024].
                 p.getViewBox().setLimits(yMin=0, yMax=1024)
 
+                # Only the bottom-most plot gets an x-axis label.
                 if r == len(_PAIRS) - 1:
                     p.setLabel("bottom", "Samples")
+
+                # All pair plots get a y-axis label.
                 p.setLabel("left", "Amplitude")
+
+                # Show top/right frame lines but hide tick marks/values there for a clean frame.
                 for edge in ["top", "right"]:
                     ax = p.getAxis(edge)
-                    ax.setStyle(showValues=False)  # hide numbers
+                    ax.setStyle(showValues=False)  # no numbers
                     ax.setTicks([])  # no tick marks
-                    ax.setPen(pg.mkPen("w", width=0.5))  # solid white line
-                    p.showAxis(edge, True)  # Show edge axis
+                    ax.setPen(pg.mkPen("w", width=0.5))  # thin white frame line
+                    p.showAxis(edge, True)  # ensure the edge is visible
 
+                # Add two overlaid curves: i (thin) and j (thick) to visually distinguish them.
                 c_i = p.plot(pen=pg.mkPen(width=1))
                 c_j = p.plot(pen=pg.mkPen(width=3))
+
+                # Track plot and curve handles for later updates.
                 self.pair_plots.append(p)
                 self.curves[i] = c_i
                 self.curves[j] = c_j
 
-                # give this row 3x weight
+                # Make this row consume 3 "units" of vertical space (relative to others).
                 left.layout.setRowStretchFactor(r, PAIR_UNITS)
 
         # ---------------- right column: 6 servo plots, each "2 units" tall ---------------
         if self._plot_out:
-            SERVO_UNITS = 2
+            # Create a sub-layout in the right column (col=1) to hold the servo plots.
+            right = self.glw.addLayout(row=0, col=1)  # servos
+            # Give the right column equal stretch weight as the left.
+            self.glw.ci.layout.setColumnStretchFactor(1, 1)
+
+            SERVO_UNITS = 2  # row stretch weight per servo plot row
             self.servo_plots: list[pg.PlotItem] = []
             self.servo_curves: list[pg.PlotDataItem] = []
 
             for s in range(_SERVOS):
+                # Add one plot per servo (stacked vertically).
                 p = right.addPlot(row=s, col=0, title=f"Servo {s + 1}")
+
+                # Lift the title up a bit for visual clarity.
                 p.titleLabel.item.setPos(0, -12)
+
+                # Horizontal grid only; faint.
                 p.showGrid(x=False, y=True, alpha=0.25)
+
+                # Servo rotation values assumed 7-bit (0..127).
                 p.setYRange(0, 127, padding=0)
                 p.enableAutoRange("y", False)
                 p.getViewBox().setLimits(yMin=0, yMax=128)
 
+                # Label the y-axis for all servo plots.
                 p.setLabel("left", "Rotation")
+
+                # Show a clean frame on top/right without ticks/values.
                 for edge in ["top", "right"]:
                     ax = p.getAxis(edge)
-                    ax.setStyle(showValues=False)  # hide numbers
-                    ax.setTicks([])  # no tick marks
-                    ax.setPen(pg.mkPen("w", width=0.5))  # solid white line
-                    p.showAxis(edge, True)  # Show edge axis
+                    ax.setStyle(showValues=False)
+                    ax.setTicks([])
+                    ax.setPen(pg.mkPen("w", width=0.5))
+                    p.showAxis(edge, True)
 
+                # Only the bottom-most servo plot gets the x-axis label.
                 if s == _SERVOS - 1:
                     p.setLabel("bottom", "Samples")
 
+                # Each servo has a single curve (moderate thickness).
                 c = p.plot(pen=pg.mkPen(width=2))
+
+                # Track handles for updates.
                 self.servo_plots.append(p)
                 self.servo_curves.append(c)
 
-                # give this row 2x weight
+                # Make this row consume 2 "units" of vertical space.
                 right.layout.setRowStretchFactor(s, SERVO_UNITS)
 
         # --- data buffers ---
@@ -160,6 +216,7 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         self._last_servo = [0] * _SERVOS
         self.sample_idx = 0  # advances ONLY on 'in' frames
 
+        # QT stuff
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(30)
@@ -177,6 +234,7 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         for s in range(_SERVOS):
             self.servo_buffers[s].append(self._last_servo[s])
 
+        # Advance the sample index only on 'in' frames (x advance)
         self.sample_idx += 1
         return True
 
@@ -185,7 +243,6 @@ class SerialMonitorWidget(QtWidgets.QWidget):
         vals = self._parse_out(payload)
         if vals is None or len(vals) != _SERVOS:
             return
-        # clamp to range 0..127 if you want hard bounds
         self._last_servo = vals
 
     def _update_plots(self) -> None:
@@ -252,6 +309,12 @@ class MonitorHandle:
     """
     Handle returned by register_monitor. Call .stop() to close the window and
     end the Qt event loop. You may also pa.unsubscribe(handle.sub) if desired.
+
+    Attributes:
+        thread: The thread running the GUI.
+        sub: The subscription used by the GUI.
+        _stop_evt: The stop event used to signal the GUI thread to exit.
+
     """
 
     thread: threading.Thread
