@@ -98,35 +98,17 @@ class HandDetector:
             return []
 
         hand_size = self.getDistance(0, 9)
-
-        hand_label = self.checkLeftRight(handNo)
-        thumb_distance = self.getDistance(self.tipIds[0], self.mcpIds[0])
-        thumb_ratio = thumb_distance / hand_size
-        if hand_label is None:
-            hand_label = "Right"
-
-        # Thumb: check x position (different logic for left vs right hand)
-        if hand_label == "Right":
-            # For right hand, thumb is up when tip x < dip x
-            # if self.landmarks[self.tipIds[0]][1] < self.landmarks[self.dipIds[0]][1]:
-            #     fingers.append(1)
-            if thumb_ratio > 0.6:
-                fingers.append(1)
-            else:
-                fingers.append(0)
-        else:  # Left hand
-            # For left hand, thumb is up when tip x > dip x
-            if self.landmarks[self.tipIds[0]][1] > self.landmarks[self.dipIds[0]][1]:
-                fingers.append(1)
-            else:
-                fingers.append(0)
-
-        # Other fingers: tip higher than pip joint (same for both hands)
-        for id in range(1, 5):
-            if self.landmarks[self.tipIds[id]][2] < self.landmarks[self.pipIds[id]][2]:
-                fingers.append(1)
-            else:
-                fingers.append(0)
+        finger_modifyer = [3.2, 1.1, 1.7, 1.8, 1.6]
+        for id in range(5):
+            finger_ratio = self.getDistance(self.tipIds[id], self.pipIds[id]) / (
+                hand_size
+            )
+            finger_ratio += self.getDistance(self.tipIds[id], self.mcpIds[id]) / (
+                hand_size
+            )
+            finger_ratio = finger_ratio ** finger_modifyer[id]
+            finger_ratio = min(max(finger_ratio, 0.0), 1.0)
+            fingers.append(round(finger_ratio, 1))
         return fingers
 
 
