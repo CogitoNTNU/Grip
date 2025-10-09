@@ -3,6 +3,7 @@ from src.serial.serial_monitor import register_monitor
 
 import time
 import random
+import argparse
 from typing import Any, Generator
 
 
@@ -33,9 +34,15 @@ def stream() -> Generator[Any, None, None]:
         yield (",".join([str(v) for v in values]) + "\n").encode("utf-8")
 
 
-if __name__ == "__main__":
-    # Open the MOCK port
-    pa = PortAccessor(port="MOCK")
+def run_test(port: str):
+    """
+    Run the serial test with specified port.
+
+    Args:
+        port: The port to connect to (e.g., "MOCK", "/dev/ttyUSB0", "/dev/ttyAMA0")
+    """
+    # Open the port
+    pa = PortAccessor(port=port)
     pa.open()
 
     # Register the monitor
@@ -51,3 +58,23 @@ if __name__ == "__main__":
     # Stop the monitor and close the port
     handle.stop()
     pa.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Test serial communication and monitoring")
+
+    port_group = parser.add_mutually_exclusive_group(required=True)
+    port_group.add_argument("--mock", action="store_true", help="Use mock port for testing")
+    port_group.add_argument("--port", type=str, help="Serial port to connect to (e.g., /dev/ttyUSB0, /dev/ttyAMA0)")
+
+    args = parser.parse_args()
+
+    port = "MOCK" if args.mock else args.port
+
+    print(f"Running serial test on port: {port}")
+
+    run_test(port=port)
+
+
+if __name__ == "__main__":
+    main()

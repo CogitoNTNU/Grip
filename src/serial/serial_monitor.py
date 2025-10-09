@@ -365,7 +365,7 @@ def register_monitor(
             sub=sub,
             parse_fn_in=parse_fn_in,
             parse_fn_out=parse_fn_out,
-            fs=fs,
+            #fs=fs,
             plot_in=plot_in,
             plot_out=plot_out,
         )
