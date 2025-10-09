@@ -6,7 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 license-files = ["LICENSE"]
 dependencies = [
+    "mediapipe>=0.10.14",
     "numpy>=2.3.3",
+    "opencv-python>=4.11.0.86",
+    "pyfirmata2>=2.5.1",
     "pyqtgraph>=0.13.7",
     "pyserial>=3.5",
     "pyside6>=6.9.3",
