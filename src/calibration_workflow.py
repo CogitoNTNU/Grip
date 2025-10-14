@@ -131,13 +131,10 @@ class CalibrationWorkflow:
         if not self.is_active:
             return "Press 'C' to start calibration"
 
-        if self.current_finger <= 1:
-            if self.current_finger == 0:
-                finger_name = "Thumb Tip"
-            else:
-                finger_name = "Thumb Base"
+        if self.current_finger < 6:
+            finger_name = self.FINGER_NAMES[self.current_finger]
         else:
-            finger_name = self.FINGER_NAMES[self.current_finger - 1]
+            finger_name = self.FINGER_NAMES[-1]
 
         if self.state == CalibrationState.WAITING:
             return f"Calibrating {finger_name}... Get ready!"
