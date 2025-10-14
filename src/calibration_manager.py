@@ -12,7 +12,7 @@ from typing import Dict, List
 class CalibrationManager:
     """Manages calibration data for hand tracking."""
 
-    FINGER_NAMES = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
+    FINGER_NAMES = ["Thumb Tip", "Thumb Base", "Index", "Middle", "Ring", "Pinky"]
 
     def __init__(self, calibration_dir: str = "vision_calibration"):
         """Initialize the calibration manager.
@@ -23,11 +23,18 @@ class CalibrationManager:
         self.calibration_dir = Path(calibration_dir)
         self.calibration_dir.mkdir(exist_ok=True)
 
-        # Calibration data structure: {finger_id: {'extended': value, 'flexed': value}}
-        self.calibration_data: Dict[int, Dict[str, float]] = {}
+        # Updated calibration data structure to include thumb tip and base
+        self.calibration_data: Dict[int, Dict[str, float]] = {
+            0: {"extended": 0.9, "flexed": 0.3},  # Thumb Tip
+            1: {"extended": 0.9, "flexed": 0.3},  # Thumb Base
+            2: {"extended": 0.9, "flexed": 0.3},  # Index
+            3: {"extended": 0.9, "flexed": 0.3},  # Middle
+            4: {"extended": 0.9, "flexed": 0.3},  # Ring
+            5: {"extended": 0.9, "flexed": 0.3},  # Pinky
+        }
 
-        self.default_extended = [0.9, 0.9, 0.9, 0.9, 0.9]
-        self.default_flexed = [0.3, 0.3, 0.3, 0.3, 0.3]
+        self.default_extended = [0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+        self.default_flexed = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3]
 
         self.is_calibrated = False
         self.current_hand_label = None  # 'Left' or 'Right'
@@ -60,7 +67,7 @@ class CalibrationManager:
                 ["finger_id", "finger_name", "extended_value", "flexed_value"]
             )
 
-            for finger_id in range(5):
+            for finger_id in range(6):  # Updated to include thumb tip and base
                 if finger_id in self.calibration_data:
                     data = self.calibration_data[finger_id]
                     writer.writerow(
@@ -183,7 +190,9 @@ class CalibrationManager:
         Returns:
             True if all fingers are calibrated, False otherwise
         """
-        return len(self.calibration_data) == 5
+        return (
+            len(self.calibration_data) == 6
+        )  # Updated to check for thumb tip and base
 
     def reset_calibration(self) -> None:
         """Reset calibration data."""
@@ -201,7 +210,7 @@ class CalibrationManager:
             return "No calibration loaded"
 
         summary = f"Calibration for {self.current_hand_label} hand:\n"
-        for finger_id in range(5):
+        for finger_id in range(6):  # Updated to include thumb tip and base
             if finger_id in self.calibration_data:
                 data = self.calibration_data[finger_id]
                 summary += f"  {self.FINGER_NAMES[finger_id]}: Extended={data['extended']:.3f}, Flexed={data['flexed']:.3f}\n"

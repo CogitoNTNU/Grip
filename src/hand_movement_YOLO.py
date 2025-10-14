@@ -109,7 +109,14 @@ class HandDetector:
 
         hand_size = self.getDistance(0, 9)
 
-        for id in range(5):
+        # thumb
+        thumb_tip_ratio = self.getDistance(self.tipIds[0], self.pipIds[0]) / hand_size
+        raw_values.append(thumb_tip_ratio)
+
+        thumb_base_ratio = self.getDistance(self.pipIds[0], self.mcpIds[0]) / hand_size
+        raw_values.append(thumb_base_ratio)
+
+        for id in range(1, 5):
             # Calculate distance ratio (tip to PIP + tip to MCP) normalized by hand size
             finger_ratio = (
                 self.getDistance(self.tipIds[id], self.pipIds[id]) / hand_size
@@ -150,7 +157,7 @@ class HandDetector:
         else:
             # Use old method with power modifiers if no calibration
             # hand_size = self.getDistance(0, 9)
-            finger_modifiers = [3.2, 1.1, 1.7, 1.8, 1.6]
+            finger_modifiers = [3.2, 3.2, 1.1, 1.7, 1.8, 1.6]
 
             for id, raw_value in enumerate(raw_values):
                 finger_ratio = raw_value ** finger_modifiers[id]

@@ -22,7 +22,7 @@ class CalibrationState(Enum):
 class CalibrationWorkflow:
     """Manages the calibration workflow with user instructions."""
 
-    FINGER_NAMES = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
+    FINGER_NAMES = ["Thumb Tip", "Thumb Base", "Index", "Middle", "Ring", "Pinky"]
     COLLECTION_DURATION = 2.5  # seconds to collect data for each state
     TRANSITION_DELAY = 1.0  # seconds between states
 
@@ -116,9 +116,8 @@ class CalibrationWorkflow:
                 # Move to next finger or complete
                 self.current_finger += 1
 
-                if self.current_finger >= 5:
+                if self.current_finger >= 6:  # Updated to include thumb tip and base
                     self.state = CalibrationState.COMPLETE
-                    self.is_active = False
                 else:
                     self.state = CalibrationState.WAITING
                     self.start_time = current_time
@@ -132,7 +131,13 @@ class CalibrationWorkflow:
         if not self.is_active:
             return "Press 'C' to start calibration"
 
-        finger_name = self.FINGER_NAMES[self.current_finger]
+        if self.current_finger <= 1:
+            if self.current_finger == 0:
+                finger_name = "Thumb Tip"
+            else:
+                finger_name = "Thumb Base"
+        else:
+            finger_name = self.FINGER_NAMES[self.current_finger - 1]
 
         if self.state == CalibrationState.WAITING:
             return f"Calibrating {finger_name}... Get ready!"
@@ -168,10 +173,10 @@ class CalibrationWorkflow:
             return ""
 
         # Handle completion state where current_finger might be >= 5
-        if self.state == CalibrationState.COMPLETE or self.current_finger >= 5:
-            return "All fingers calibrated (5/5)"
+        if self.state == CalibrationState.COMPLETE or self.current_finger >= 6:
+            return "All fingers calibrated (6/6)"
 
-        return f"Finger {self.current_finger + 1}/5 ({self.FINGER_NAMES[self.current_finger]})"
+        return f"Finger {self.current_finger + 1}/6 ({self.FINGER_NAMES[self.current_finger]})"
 
     def is_collecting(self) -> bool:
         """Check if currently collecting data.
@@ -204,7 +209,7 @@ class CalibrationWorkflow:
         """Get the current finger being calibrated.
 
         Returns:
-            Finger index (0-4)
+            Finger index (0-5)
         """
         return self.current_finger
 
