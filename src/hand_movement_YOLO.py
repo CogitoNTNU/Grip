@@ -114,6 +114,9 @@ class HandDetector:
         raw_values.append(thumb_tip_ratio)
 
         thumb_base_ratio = self.getDistance(self.pipIds[0], self.mcpIds[0]) / hand_size
+        thumb_base_ratio += (
+            self.getDistance(self.dipIds[0], self.mcpIds[-1]) / hand_size
+        )
         raw_values.append(thumb_base_ratio)
 
         for id in range(1, 5):
