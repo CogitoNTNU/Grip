@@ -89,5 +89,71 @@ def print_calibration_loaded(hand):
     print(f"✓ Auto-loaded calibration for {hand} hand")
 
 
+def draw_sensor_data_panel(frame, sensor_values, x_offset=None):
+    h, w, _ = frame.shape
+
+    if x_offset is None:
+        x_offset = w - 250
+
+    y_offset = 150
+    cv2.putText(
+        frame,
+        "Sensor Data:",
+        (x_offset, y_offset),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 255, 255),
+        1,
+    )
+
+    for i, val in enumerate(sensor_values):
+        y_pos = y_offset + 30 + (i * 25)
+        text = f"Ch{i}: {val}"
+        cv2.putText(
+            frame,
+            text,
+            (x_offset, y_pos),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 255),
+            1,
+        )
+
+
+def draw_collection_status_bar(frame, is_collecting, sample_count, target_samples):
+    cv2.putText(
+        frame,
+        f"Samples: {sample_count}/{target_samples}",
+        (10, frame.shape[0] - 20),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 255, 0) if is_collecting else (100, 100, 100),
+        2,
+    )
+
+    if is_collecting:
+        cv2.putText(
+            frame,
+            "COLLECTING",
+            (10, frame.shape[0] - 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 255),
+            2,
+        )
+
+
+def draw_phase_instruction(frame, text, color=(255, 255, 0)):
+    cv2.putText(
+        frame,
+        text,
+        (10, frame.shape[0] - 20),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        color,
+        2,
+    )
+
+
 def print_no_calibration():
     print("ℹ No existing calibration found. Press 'C' to calibrate.")
