@@ -6,6 +6,15 @@ import math
 import mediapipe as mp
 
 from src.calibration_manager import CalibrationManager
+from src.ui_utils import (
+    draw_calibration_ui,
+    draw_hand_info,
+    draw_calibration_status,
+    print_startup_banner,
+    print_controls,
+    print_calibration_loaded,
+    print_no_calibration,
+)
 
 
 # HandDetector class
@@ -195,56 +204,6 @@ class HandDetector:
 # --- Main program ---
 
 
-def draw_calibration_ui(frame, workflow, hand_label):
-    """Draw calibration UI elements on the frame.
-
-    Args:
-        frame: Video frame
-        workflow: CalibrationWorkflow instance
-        hand_label: Current hand label ('Left' or 'Right')
-    """
-    h, w, _ = frame.shape
-
-    # Get instruction text
-    instruction = workflow.get_instruction_text()
-    progress = workflow.get_progress_text()
-
-    # Get color based on state
-    color = workflow.get_visual_indicator_color()
-
-    # Draw semi-transparent overlay at top
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (w, 150), (0, 0, 0), -1)
-    cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-
-    # Draw instruction text
-    cv2.putText(frame, instruction, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
-
-    # Draw progress
-    if progress:
-        cv2.putText(
-            frame, progress, (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2
-        )
-
-    # Draw hand label
-    cv2.putText(
-        frame,
-        f"Hand: {hand_label}",
-        (20, 120),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (200, 200, 200),
-        1,
-    )
-
-    # Draw visual indicator (pulsing circle when collecting)
-    if workflow.is_collecting():
-        import time
-
-        pulse = int((time.time() % 1.0) * 100) + 50
-        cv2.circle(frame, (w - 80, 80), pulse, color, 3)
-
-
 def main():
     """Main function to run hand tracking with calibration."""
     from src.calibration_workflow import CalibrationWorkflow
@@ -254,39 +213,27 @@ def main():
     detector = HandDetector(maxHands=1, use_calibration=True)
     workflow = CalibrationWorkflow()
 
-    # Try to load existing calibration automatically
     calibration_loaded = False
     current_hand = None
 
-    print("=" * 60)
-    print("Hand Tracking with Calibration")
-    print("=" * 60)
+    print_startup_banner()
 
-    # Auto-load calibration if available
     calibration_dir = Path("vision_calibration")
     if calibration_dir.exists():
-        # Try to load calibration for both hands, prioritize Right hand
         for hand in ["Right", "Left"]:
             calibration_file = calibration_dir / f"calibration_{hand.lower()}_hand.csv"
             if calibration_file.exists():
                 if detector.loadCalibration(hand):
                     current_hand = hand
                     calibration_loaded = True
-                    print(f"✓ Auto-loaded calibration for {hand} hand")
+                    print_calibration_loaded(hand)
                     print(detector.calibration_manager.get_calibration_summary())
                     break
 
     if not calibration_loaded:
-        print("ℹ No existing calibration found. Press 'C' to calibrate.")
+        print_no_calibration()
 
-    print("=" * 60)
-    print("Controls:")
-    print("  C - Start calibration")
-    print("  S - Save calibration (after completion)")
-    print("  L - Load existing calibration")
-    print("  R - Reset calibration")
-    print("  Q - Quit")
-    print("=" * 60)
+    print_controls()
 
     while True:
         success, frame = cap.read()
@@ -336,43 +283,12 @@ def main():
 
                 else:
                     fingers = detector.fingersUp(handNo=0)
-                    fingers_display = [round(f, 1) for f in fingers]
-
-                    # Display hand info
-                    text = f"{hand_label} Hand: {fingers_display}"
-                    cv2.putText(
+                    draw_hand_info(frame, hand_label, fingers)
+                    draw_calibration_status(
                         frame,
-                        text,
-                        (10, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 255, 0),
-                        2,
+                        detector.calibration_manager.is_calibrated,
+                        detector.calibration_manager.current_hand_label,
                     )
-
-                    # Display calibration status
-                    if detector.calibration_manager.is_calibrated:
-                        status_text = f"Calibrated ({detector.calibration_manager.current_hand_label})"
-                        cv2.putText(
-                            frame,
-                            status_text,
-                            (10, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.5,
-                            (0, 255, 255),
-                            1,
-                        )
-                    else:
-                        status_text = "Not calibrated (Press 'C')"
-                        cv2.putText(
-                            frame,
-                            status_text,
-                            (10, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.5,
-                            (0, 0, 255),
-                            1,
-                        )
 
         # Handle keyboard commands
         if key == ord("q"):
