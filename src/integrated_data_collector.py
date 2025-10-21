@@ -127,9 +127,7 @@ def collect_integrated_data(
                 if len(lmList) != 0:
                     fingers = detector.fingersUp(handNo=0)
                     if len(fingers) >= 5:
-                        raw_values = detector.getRawFingerValues()
-                        if len(raw_values) >= 6:
-                            finger_values = raw_values[:6]
+                        finger_values = [fingers[0], 0.0] + fingers[1:]  # thumb_tip, thumb_base, index, middle, ring, pinky
 
                     draw_hand_info(frame, hand_label, fingers)
                     draw_calibration_status(
