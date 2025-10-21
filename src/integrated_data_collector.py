@@ -133,10 +133,61 @@ def collect_integrated_data(
             writer = csv.writer(f)
             write_csv_header(writer)
 
-            while sample_count < num_iterations and not should_exit:
-                success, frame = cap.read()
-                if not success:
-                    print("Failed to capture video.")
+        while sample_count < num_iterations:
+            success, frame = cap.read()
+            if not success:
+                print("Failed to capture video.")
+                break
+
+            frame = cv2.flip(frame, 1)
+            frame = detector.findHands(frame)
+
+            key = cv2.waitKey(1) & 0xFF
+
+            try:
+                while not subscription.queue.empty():
+                    payload = subscription.queue.get_nowait()
+                    latest_sensor_values = parse_sensor_data(payload.data)
+            except Exception as e:
+                print(f"Error parsing sensor data: {e}")
+                pass
+
+            finger_values = [0.0] * 6
+            hand_label = "None"
+
+            if detector.results.multi_hand_landmarks:
+                lmList = detector.findPosition(frame, handNo=0, draw=False)
+                hand_label = detector.checkLeftRight(handNo=0)
+
+                if len(lmList) != 0:
+                    fingers = detector.fingersUp(handNo=0)
+                    if len(fingers) >= 5:
+                        finger_values = [fingers[0], 0.0] + fingers[1:]  # thumb_tip, thumb_base, index, middle, ring, pinky
+
+                    draw_hand_info(frame, hand_label, fingers)
+                    draw_calibration_status(
+                        frame,
+                        detector.calibration_manager.is_calibrated,
+                        detector.calibration_manager.current_hand_label,
+                    )
+
+            draw_sensor_data_panel(frame, latest_sensor_values[:8])
+            draw_collection_status_bar(
+                frame, is_collecting, sample_count, num_iterations
+            )
+
+            if is_collecting:
+                row = (
+                    [datetime.now().isoformat(), sample_count]
+                    + latest_sensor_values[:8]
+                    + [f"{v:.4f}" for v in finger_values]
+                    + [hand_label]
+                )
+                writer.writerow(row)
+                sample_count += 1
+
+                if sample_count >= num_iterations:
+                    print(f"\nCollection complete! {sample_count} samples collected.")
                     break
 
                 frame = cv2.flip(frame, 1)
