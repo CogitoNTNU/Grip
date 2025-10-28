@@ -1,0 +1,10 @@
+# Training Dependencies
+# For training neural networks and XGBoost models
+
+torch>=2.9.0
+numpy>=2.3.3
+pandas>=2.3.3
+xgboost>=2.0.0
+scikit-learn>=1.5.0
+matplotlib>=3.9.0
+jupyter>=1.1.0

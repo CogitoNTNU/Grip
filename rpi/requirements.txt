@@ -1,0 +1,6 @@
+# Raspberry Pi Dependencies
+# Lightweight dependencies for running on RPi
+
+pyserial>=3.5
+gpiozero>=2.0
+numpy>=2.0
