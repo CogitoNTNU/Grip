@@ -1,17 +1,15 @@
-import serial, threading, time
+import threading
+import time
+
 from gpiozero import Servo
 
+import serial
+
 # Bruk BCM-numre (de du valgte)
-servos = [
-    Servo(17),
-    Servo(27),
-    Servo(22),
-    Servo(23),
-    Servo(24),
-    Servo(25)
-]
+servos = [Servo(17), Servo(27), Servo(22), Servo(23), Servo(24), Servo(25)]
 
 ser = serial.Serial("/dev/ttyAMA0", 9600, timeout=0.5)
+
 
 def reader():
     while True:
@@ -29,6 +27,7 @@ def reader():
                 print(f"[UART] Sensor={value:4d}  ->  Servo pos={pos:.2f}")
             except ValueError:
                 pass
+
 
 threading.Thread(target=reader, daemon=True).start()
 
