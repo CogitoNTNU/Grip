@@ -1,6 +1,6 @@
 import cv2
 from pathlib import Path
-from src.ui_utils import (
+from data_collection.calibration.ui_utils import (
     draw_calibration_ui,
     draw_hand_info,
     draw_calibration_status,
@@ -12,7 +12,7 @@ from src.ui_utils import (
 
 def auto_load_calibration(detector):
     current_hand = None
-    calibration_dir = Path("vision_calibration")
+    calibration_dir = Path("data/calibration")
 
     if calibration_dir.exists():
         for hand in ["Right", "Left"]:

@@ -4,16 +4,16 @@ import cv2
 import csv
 import time
 from datetime import datetime
-from src.hand_movement_YOLO import HandDetector
-from src.calibration_workflow import CalibrationWorkflow
-from src.calibration_helpers import run_calibration_loop
-from src.serial.port_accessor import PortAccessor
-from src.serial.serial_monitor import register_monitor
-from src.data_collector import (
+from data_collection.vision.hand_tracking import HandDetector
+from data_collection.calibration.calibration_workflow import CalibrationWorkflow
+from data_collection.calibration.calibration_helpers import run_calibration_loop
+from rpi.src.serial.port_accessor import PortAccessor
+from data_collection.utils.serial_monitor import register_monitor
+from data_collection.collectors.data_collector import (
     create_data_directory,
     parse_port_event,
 )
-from src.ui_utils import (
+from data_collection.calibration.ui_utils import (
     draw_hand_info,
     draw_calibration_status,
     draw_sensor_data_panel,

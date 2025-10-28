@@ -5,8 +5,8 @@ import cv2
 import math
 import mediapipe as mp
 
-from src.calibration_manager import CalibrationManager
-from src.ui_utils import (
+from data_collection.calibration.calibration_manager import CalibrationManager
+from data_collection.calibration.ui_utils import (
     draw_calibration_ui,
     draw_hand_info,
     draw_calibration_status,

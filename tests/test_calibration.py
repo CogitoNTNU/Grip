@@ -3,8 +3,8 @@ Test script for calibration system
 Tests the CalibrationManager and CalibrationWorkflow classes
 """
 
-from src.calibration_manager import CalibrationManager
-from src.calibration_workflow import CalibrationWorkflow
+from data_collection.calibration.calibration_manager import CalibrationManager
+from data_collection.calibration.calibration_workflow import CalibrationWorkflow
 import time
 
 

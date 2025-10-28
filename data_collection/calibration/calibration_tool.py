@@ -6,10 +6,10 @@ Command-line tool for managing hand tracking calibration files
 import argparse
 import sys
 from pathlib import Path
-from src.calibration_manager import CalibrationManager
+from data_collection.calibration.calibration_manager import CalibrationManager
 
 
-def list_calibrations(calibration_dir: str = "vision_calibration"):
+def list_calibrations(calibration_dir: str = "data/calibration"):
     """List all available calibration files."""
     path = Path(calibration_dir)
 

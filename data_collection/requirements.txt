@@ -1,0 +1,10 @@
+# Data Collection Dependencies
+# For running data collection and calibration on laptop
+
+mediapipe>=0.10.14
+opencv-python>=4.11.0.86
+numpy>=2.3.3
+pandas>=2.3.3
+pyserial>=3.5
+pyside6>=6.9.3
+pyqtgraph>=0.13.7

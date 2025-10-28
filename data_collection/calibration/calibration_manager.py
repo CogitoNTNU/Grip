@@ -14,7 +14,7 @@ class CalibrationManager:
 
     FINGER_NAMES = ["Thumb Tip", "Thumb Base", "Index", "Middle", "Ring", "Pinky"]
 
-    def __init__(self, calibration_dir: str = "vision_calibration"):
+    def __init__(self, calibration_dir: str = "data/calibration"):
         """Initialize the calibration manager.
 
         Args:

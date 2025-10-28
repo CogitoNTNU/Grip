@@ -11,7 +11,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
-from src.serial.port_accessor import PortAccessor, Subscription
+from rpi.src.serial.port_accessor import PortAccessor, Subscription
 
 
 # ---------------- internal: parsers ----------------

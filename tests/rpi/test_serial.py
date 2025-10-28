@@ -1,5 +1,5 @@
-from src.serial.port_accessor import PortAccessor, PortEvent
-from src.serial.serial_monitor import register_monitor
+from rpi.src.serial.port_accessor import PortAccessor, PortEvent
+from data_collection.utils.serial_monitor import register_monitor
 
 import time
 import random
