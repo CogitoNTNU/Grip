@@ -134,7 +134,7 @@ class HandDetector:
                 self.getDistance(self.tipIds[id], self.pipIds[id]) / hand_size
             )
             finger_ratio += (
-                self.getDistance(self.tipIds[id], self.mcpIds[id]) / hand_size
+                self.getDistance(self.dipIds[id], self.mcpIds[id]) / hand_size
             )
             raw_values.append(finger_ratio)
 
