@@ -246,5 +246,5 @@ def collect_integrated_data(
 
 if __name__ == "__main__":
     collect_integrated_data(
-        port="MOCK", num_iterations=1000, sleep_time=0.05, batch_size=100
+        port="COM3", num_iterations=1000, sleep_time=0.05, batch_size=100
     )
