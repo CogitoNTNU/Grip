@@ -157,17 +157,21 @@ def collect_integrated_data(
                 frame = detector.findHands(frame)
                 key = cv2.waitKey(1) & 0xFF
 
+                # Read ALL sensor data from queue and push to monitor
                 try:
+                    queue_count = 0
                     while not subscription.queue.empty():
                         payload = subscription.queue.get_nowait()
                         latest_sensor_values = parse_port_event(payload)
+                        queue_count += 1
 
-                        # Push to web monitor for live graphs
+                        # Push each reading to web monitor immediately
                         if web_monitor and len(latest_sensor_values) == 8:
                             web_monitor.push_data(latest_sensor_values)
-                        elif web_monitor and len(latest_sensor_values) != 8:
-                            if sample_count % 100 == 0:  # Only print occasionally
-                                print(f"Debug: Got {len(latest_sensor_values)} values (expected 8): {latest_sensor_values}")
+
+                    # Debug: print queue activity
+                    if queue_count > 0 and sample_count % 50 == 0:
+                        print(f"Debug: Processed {queue_count} items from queue, sample {sample_count}")
 
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
