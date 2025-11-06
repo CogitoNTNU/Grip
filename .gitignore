@@ -253,7 +253,3 @@ lerna-debug.log
 .DS_Store
 Thumbs.db
 
-# User data - raw data, calibrations, and processed data
-data/*/raw/
-data/*/calibration/
-data/*/processed/
