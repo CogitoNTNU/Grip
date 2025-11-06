@@ -80,7 +80,7 @@ class WebMonitor:
                             print(f"SSE sending: samples={self.sample_count}, buffer_sizes={sizes}")
 
                     yield f"data: {json.dumps(data)}\n\n"
-                    time.sleep(0.1)  # Update every 100ms
+                    time.sleep(0.02)  # Update every 20ms (50Hz) for better responsiveness
 
             return Response(generate(), mimetype='text/event-stream')
 

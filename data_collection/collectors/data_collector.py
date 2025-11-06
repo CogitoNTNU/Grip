@@ -107,7 +107,7 @@ def collect_data(
 
     csv_file = create_csv_file(raw_data_dir)
 
-    pa: PortAccessor = PortAccessor(port=port)
+    pa: PortAccessor = PortAccessor(port=port, baudrate=115200)
     pa.open()
 
     subscription = pa.subscribe(max_queue=100)

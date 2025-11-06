@@ -119,9 +119,9 @@ def collect_integrated_data(
     print("Press 'SPACE' to start/pause collection")
     print("Press 'Q' to quit and save")
     print("=" * 60)
-    pa = PortAccessor(port=port)
+    pa = PortAccessor(port=port, baudrate=115200)
     pa.open()
-    subscription = pa.subscribe(max_queue=100)
+    subscription = pa.subscribe(max_queue=20)  # Smaller queue for lower latency
 
     # Start web-based monitor (browser)
     web_monitor = None
@@ -215,7 +215,6 @@ def collect_integrated_data(
                             f"\nCollection complete! {sample_count} samples collected."
                         )
                         break
-                    time.sleep(sleep_time)
                 cv2.imshow("Integrated Data Collection", frame)
 
                 if key == ord(" "):

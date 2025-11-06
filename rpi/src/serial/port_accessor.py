@@ -377,7 +377,7 @@ class PortAccessor:
                 # Reading outside the lock; pyserial is not guaranteed thread-safe,
                 # but we only ever write under lock; read is single-threaded here.
                 line = self.ser.readline()
-                time.sleep(0.05)
+                # Removed sleep for better responsiveness with high-speed data (100Hz+)
             except (SerialException, OSError):
                 # Try to open with backoff; _with_retry handles open
                 try:
