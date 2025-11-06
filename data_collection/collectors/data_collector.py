@@ -1,5 +1,6 @@
 from rpi.src.serial.port_accessor import PortAccessor, PortEvent
 from data_collection.utils.serial_monitor import register_monitor
+from data_collection.utils.user_paths import get_user_input, get_user_paths, print_user_paths
 
 import random
 import csv
@@ -25,11 +26,17 @@ def stream() -> Generator[Any, None, None]:
         yield (",".join([str(v) for v in values]) + "\n").encode("utf-8")
 
 
-def create_data_directory() -> Path:
-    """Create and return the data directory path."""
-    data_dir = Path("data")
-    data_dir.mkdir(exist_ok=True)
-    return data_dir
+def create_data_directory(username: str = "default") -> Path:
+    """Create and return the data directory path for a specific user.
+
+    Args:
+        username: Username for data separation (default: "default")
+
+    Returns:
+        Path to the raw data directory for the user
+    """
+    _, raw_data_dir, _ = get_user_paths(username)
+    return raw_data_dir
 
 
 def create_csv_file(data_dir: Path) -> Path:
@@ -69,7 +76,7 @@ def parse_port_event(event: PortEvent) -> list[str]:
 
 
 def collect_data(
-    port: str = "MOCK", num_iterations: int = 5000, sleep_time: float = 0.05
+    port: str = "MOCK", num_iterations: int = 5000, sleep_time: float = 0.05, username: str = "default"
 ) -> None:
     """
     Collect data from the port and write it to a CSV file.
@@ -78,9 +85,12 @@ def collect_data(
         port: The port to connect to (default: "MOCK")
         num_iterations: Number of data points to collect (default: 5000)
         sleep_time: Time to sleep between iterations in seconds (default: 0.05)
+        username: Username for data separation (default: "default")
     """
-    data_dir = create_data_directory()
-    csv_file = create_csv_file(data_dir)
+    calibration_dir, raw_data_dir, _ = get_user_paths(username)
+    print_user_paths(username, calibration_dir, raw_data_dir)
+
+    csv_file = create_csv_file(raw_data_dir)
 
     pa: PortAccessor = PortAccessor(port=port)
     pa.open()
@@ -110,4 +120,6 @@ def collect_data(
 
 
 if __name__ == "__main__":
-    collect_data()
+    # Get username from user input
+    username = get_user_input()
+    collect_data(username=username)

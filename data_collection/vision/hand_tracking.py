@@ -26,6 +26,7 @@ class HandDetector:
         detectionCon=0.7,
         trackCon=0.5,
         use_calibration=True,
+        calibration_dir="data/calibration",
     ):
         self.mode = mode
         self.maxHands = maxHands
@@ -47,7 +48,7 @@ class HandDetector:
 
         # Calibration
         self.use_calibration = use_calibration
-        self.calibration_manager = CalibrationManager() if use_calibration else None
+        self.calibration_manager = CalibrationManager(calibration_dir) if use_calibration else None
 
     def findHands(self, img, draw=True):
         imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)

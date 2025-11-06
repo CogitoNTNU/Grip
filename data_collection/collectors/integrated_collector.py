@@ -4,22 +4,25 @@ os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 import csv
 import time
+from pathlib import Path
 from datetime import datetime
 from data_collection.vision.hand_tracking import HandDetector
 from data_collection.calibration.calibration_workflow import CalibrationWorkflow
 from data_collection.calibration.calibration_helpers import run_calibration_loop
 from rpi.src.serial.port_accessor import PortAccessor
 from data_collection.utils.serial_monitor import register_monitor
-from data_collection.collectors.data_collector import (
-    create_data_directory,
-    parse_port_event,
-)
+from data_collection.collectors.data_collector import parse_port_event
 from data_collection.calibration.ui_utils import (
     draw_hand_info,
     draw_calibration_status,
     draw_sensor_data_panel,
     draw_collection_status_bar,
     print_startup_banner,
+)
+from data_collection.utils.user_paths import (
+    get_user_input,
+    get_user_paths,
+    print_user_paths,
 )
 
 
@@ -91,14 +94,18 @@ def collect_integrated_data(
     num_iterations: int = 1000,
     sleep_time: float = 0.05,
     batch_size: int = 100,
+    username: str = "default",
 ) -> None:
-    data_dir = create_data_directory()
-    csv_file = create_csv_file(data_dir)
+    # Get user-specific paths
+    calibration_dir, raw_data_dir, processed_data_dir = get_user_paths(username)
+    print_user_paths(username, calibration_dir, raw_data_dir)
+
+    csv_file = create_csv_file(raw_data_dir)
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    detector = HandDetector(maxHands=1, use_calibration=True)
+    detector = HandDetector(maxHands=1, use_calibration=True, calibration_dir=str(calibration_dir))
     workflow = CalibrationWorkflow()
     print_startup_banner()
-    run_calibration_loop(cap, detector, workflow, "Integrated Data Collection")
+    run_calibration_loop(cap, detector, workflow, "Integrated Data Collection", calibration_dir=str(calibration_dir))
     print("\n" + "=" * 60)
     print("DATA COLLECTION PHASE")
     print("=" * 60)
@@ -245,6 +252,13 @@ def collect_integrated_data(
 
 
 if __name__ == "__main__":
+    # Get username from user input
+    username = get_user_input()
+
     collect_integrated_data(
-        port="COM3", num_iterations=100000, sleep_time=0.05, batch_size=100
+        port="COM3",
+        num_iterations=100000,
+        sleep_time=0.05,
+        batch_size=100,
+        username=username
     )
