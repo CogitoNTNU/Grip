@@ -1,6 +1,8 @@
 import os
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
+# Fix Qt platform plugin on Mac
+os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""
 import cv2
 import csv
 import time
@@ -10,6 +12,7 @@ from data_collection.vision.hand_tracking import HandDetector
 from data_collection.calibration.calibration_workflow import CalibrationWorkflow
 from data_collection.calibration.calibration_helpers import run_calibration_loop
 from rpi.src.serial.port_accessor import PortAccessor
+from data_collection.utils.serial_monitor import register_monitor
 from data_collection.collectors.data_collector import parse_port_event
 from data_collection.calibration.ui_utils import (
     draw_hand_info,
@@ -117,6 +120,13 @@ def collect_integrated_data(
     pa = PortAccessor(port=port)
     pa.open()
     subscription = pa.subscribe(max_queue=100)
+
+    # Register monitor to display sensor data in real-time
+    handle = None
+    try:
+        handle = register_monitor(pa, fs=1000, title="Sensor Monitor", plot_out=False)
+    except Exception as e:
+        print(f"Warning: Could not start monitor: {e}")
 
     is_collecting = False
     sample_count = 0
@@ -226,6 +236,11 @@ def collect_integrated_data(
                 print(f"Failed to save remaining data: {save_error}")
     finally:
         print("\nCleaning up resources...")
+        if handle is not None:
+            try:
+                handle.stop()
+            except Exception as e:
+                print(f"Error stopping monitor: {e}")
         try:
             pa.unsubscribe(subscription)
         except Exception as e:
