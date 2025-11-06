@@ -1,8 +1,6 @@
 import os
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
-# Fix Qt platform plugin on Mac
-os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = ""
 import cv2
 import csv
 import time
