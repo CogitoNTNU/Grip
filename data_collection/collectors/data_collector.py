@@ -1,5 +1,4 @@
 from rpi.src.serial.port_accessor import PortAccessor, PortEvent
-from data_collection.utils.serial_monitor import register_monitor
 from data_collection.utils.user_paths import (
     get_user_input,
     get_user_paths,
@@ -102,13 +101,6 @@ def collect_data(
 
     subscription = pa.subscribe(max_queue=100)
 
-    # Try to register monitor, but continue if it fails (Qt issues on some systems)
-    handle = None
-    try:
-        handle = register_monitor(pa, fs=1000, title="Throughput Monitor", plot_out=False)
-    except Exception as e:
-        print(f"Warning: Could not initialize monitor (continuing without it): {e}")
-
     with open(csv_file, "w", newline="") as f:
         writer = csv.writer(f)
         write_csv_header(writer)
@@ -123,8 +115,6 @@ def collect_data(
 
             # time.sleep(sleep_time)
 
-    if handle is not None:
-        handle.stop()
     pa.close()
 
     print(f"Data saved to {csv_file}")
