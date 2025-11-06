@@ -165,17 +165,24 @@ def collect_integrated_data(
                         latest_sensor_values = parse_port_event(payload)
                         queue_count += 1
 
+                        # Debug: print first few values
+                        if queue_count == 1 and sample_count < 5:
+                            print(f"First sensor data: {latest_sensor_values}")
+
                         # Push each reading to web monitor immediately
                         if web_monitor and len(latest_sensor_values) == 8:
                             web_monitor.push_data(latest_sensor_values)
+                        elif web_monitor:
+                            print(f"Warning: Got {len(latest_sensor_values)} values (expected 8)")
 
-                    # Debug: print queue activity
-                    if queue_count > 0 and sample_count % 50 == 0:
-                        print(f"Debug: Processed {queue_count} items from queue, sample {sample_count}")
+                    # Debug: print queue activity regularly
+                    if queue_count > 0 and sample_count % 10 == 0:
+                        print(f"Queue: {queue_count} items processed | Sample: {sample_count} | Values: {latest_sensor_values[:4]}...")
 
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
-                    pass
+                    import traceback
+                    traceback.print_exc()
 
                 hand_label, finger_values = get_hand_data(detector, frame)
                 draw_hand_ui(detector, frame, hand_label)
