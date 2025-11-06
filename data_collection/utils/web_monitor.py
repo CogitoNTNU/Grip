@@ -57,7 +57,9 @@ class WebMonitor:
         @self.app.route('/')
         def index():
             """Serve main monitor page."""
-            return self._get_html()
+            html = self._get_html()
+            print(f"Serving HTML ({len(html)} bytes)")
+            return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
 
         @self.app.route('/stream')
         def stream():

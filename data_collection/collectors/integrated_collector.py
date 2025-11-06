@@ -127,10 +127,10 @@ def collect_integrated_data(
     web_monitor = None
     try:
         web_monitor = WebMonitor(max_samples=300)
-        web_monitor.start(port=5000)
+        web_monitor.start(port=5001)  # Changed to 5001 to avoid conflicts
         time.sleep(1)  # Give server time to start
-        webbrowser.open('http://localhost:5000')
-        print("✓ Sensor monitor started at http://localhost:5000")
+        webbrowser.open('http://localhost:5001')
+        print("✓ Sensor monitor started at http://localhost:5001")
     except Exception as e:
         print(f"⚠ Warning: Could not start web monitor: {e}")
         print("  (Data collection will continue without live graphs)")
