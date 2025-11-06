@@ -74,6 +74,11 @@ class WebMonitor:
                                 for key, buffer in self.buffers.items()
                             }
                         }
+                        # Debug: Log buffer sizes
+                        if self.sample_count % 100 == 0 and self.sample_count > 0:
+                            sizes = {k: len(v) for k, v in self.buffers.items()}
+                            print(f"SSE sending: samples={self.sample_count}, buffer_sizes={sizes}")
+
                     yield f"data: {json.dumps(data)}\n\n"
                     time.sleep(0.1)  # Update every 100ms
 
@@ -214,6 +219,15 @@ class WebMonitor:
         eventSource.onmessage = (e) => {
             const data = JSON.parse(e.data);
             document.getElementById('count').textContent = data.sample_count;
+
+            // Debug: log every 50 samples
+            if (data.sample_count % 50 === 0 && data.sample_count > 0) {
+                const sizes = {};
+                for (const [key, val] of Object.entries(data.buffers)) {
+                    sizes[key] = val.length;
+                }
+                console.log('Received data:', { sample_count: data.sample_count, buffer_sizes: sizes });
+            }
 
             charts.forEach(({ chart, raw, env }) => {
                 const rawData = data.buffers[raw] || [];
