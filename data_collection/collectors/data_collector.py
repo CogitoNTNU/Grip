@@ -5,6 +5,7 @@ from data_collection.utils.user_paths import (
     print_user_paths,
     get_serial_port_input,
 )
+from data_collection.utils.arduino_parser import parse_arduino_format
 
 import random
 import csv
@@ -74,8 +75,18 @@ def parse_payload(payload: bytes) -> list[str]:
 
 
 def parse_port_event(event: PortEvent) -> list[str]:
-    """Parse the PortEvent data and return a list of values."""
-    data_str = event.data.decode("utf-8").strip()
+    """Parse the PortEvent data and return a list of values.
+
+    Supports new Arduino format: S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env
+    Falls back to CSV format if parsing fails.
+    """
+    # Try new Arduino format first
+    parsed = parse_arduino_format(event.data)
+    if parsed is not None:
+        return [str(v) for v in parsed]
+
+    # Fallback to simple CSV split
+    data_str = event.data.decode("utf-8", errors='ignore').strip()
     return data_str.split(",")
 
 

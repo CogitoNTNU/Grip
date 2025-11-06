@@ -1,6 +1,12 @@
 import os
+import sys
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
+
+# Fix Qt platform plugin issues on Mac
+if sys.platform == "darwin":  # macOS
+    os.environ["QT_MAC_WANTS_LAYER"] = "1"
+
 import cv2
 import csv
 import time
@@ -12,6 +18,7 @@ from data_collection.calibration.calibration_helpers import run_calibration_loop
 from rpi.src.serial.port_accessor import PortAccessor
 from data_collection.utils.serial_monitor import register_monitor
 from data_collection.collectors.data_collector import parse_port_event
+from data_collection.utils.arduino_parser import parse_arduino_format
 from data_collection.calibration.ui_utils import (
     draw_hand_info,
     draw_calibration_status,
@@ -122,9 +129,17 @@ def collect_integrated_data(
     # Register monitor to display sensor data in real-time
     handle = None
     try:
-        handle = register_monitor(pa, fs=1000, title="Sensor Monitor", plot_out=False)
+        handle = register_monitor(
+            pa,
+            parse_fn_in=parse_arduino_format,
+            fs=1000,
+            title="Grip Sensor Monitor",
+            plot_out=False
+        )
+        print("✓ Sensor monitor started")
     except Exception as e:
-        print(f"Warning: Could not start monitor: {e}")
+        print(f"⚠ Warning: Could not start monitor: {e}")
+        print("  (Data collection will continue without live graphs)")
 
     is_collecting = False
     sample_count = 0

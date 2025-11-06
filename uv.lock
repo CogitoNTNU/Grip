@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
@@ -452,6 +452,7 @@ name = "grip"
 version = "0.0.1"
 source = { virtual = "." }
 dependencies = [
+    { name = "matplotlib" },
     { name = "mediapipe" },
     { name = "numpy" },
     { name = "opencv-python" },
@@ -482,6 +483,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "mediapipe", specifier = ">=0.10.14" },
     { name = "numpy", specifier = ">=2.3.3" },
     { name = "opencv-python", specifier = ">=4.11.0.86" },
