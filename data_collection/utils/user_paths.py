@@ -5,6 +5,7 @@ Supports multiple users with separate data directories.
 
 from pathlib import Path
 from typing import Tuple
+import serial.tools.list_ports
 
 
 def list_existing_users(data_root: str = "data") -> list[str]:
@@ -101,3 +102,69 @@ def print_user_paths(username: str, calibration_dir: Path, raw_data_dir: Path):
     print(f"  Calibration: {calibration_dir}")
     print(f"  Raw data:    {raw_data_dir}")
     print("=" * 60 + "\n")
+
+
+def list_serial_ports() -> list[str]:
+    """List all available serial ports.
+
+    Returns:
+        List of available serial port names
+    """
+    ports = serial.tools.list_ports.comports()
+    return [port.device for port in ports]
+
+
+def get_serial_port_input() -> str:
+    """Prompt user to select a serial port.
+
+    Shows list of available ports and prompts for selection.
+    Returns 'MOCK' if user wants to use mock data or no ports available.
+
+    Returns:
+        Selected serial port name or 'MOCK'
+    """
+    available_ports = list_serial_ports()
+
+    print("\n" + "=" * 60)
+    print("SERIAL PORT SELECTION")
+    print("=" * 60)
+
+    if available_ports:
+        print("Available serial ports:")
+        for i, port in enumerate(available_ports, 1):
+            print(f"  [{i}] {port}")
+        print(f"  [0] MOCK (simulate data without hardware)")
+        print("-" * 60)
+
+        while True:
+            try:
+                choice = input(f"Select port (0-{len(available_ports)}) or press Enter for MOCK: ").strip()
+
+                if not choice:
+                    print("Selected: MOCK mode")
+                    print("=" * 60)
+                    return "MOCK"
+
+                choice_num = int(choice)
+
+                if choice_num == 0:
+                    print("Selected: MOCK mode")
+                    print("=" * 60)
+                    return "MOCK"
+
+                if 1 <= choice_num <= len(available_ports):
+                    selected_port = available_ports[choice_num - 1]
+                    print(f"Selected: {selected_port}")
+                    print("=" * 60)
+                    return selected_port
+
+                print(f"Invalid choice. Please enter 0-{len(available_ports)}")
+
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+
+    else:
+        print("No serial ports found!")
+        print("Using MOCK mode (simulated data)")
+        print("=" * 60)
+        return "MOCK"

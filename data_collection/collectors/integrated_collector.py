@@ -23,6 +23,7 @@ from data_collection.utils.user_paths import (
     get_user_input,
     get_user_paths,
     print_user_paths,
+    get_serial_port_input,
 )
 
 
@@ -255,8 +256,11 @@ if __name__ == "__main__":
     # Get username from user input
     username = get_user_input()
 
+    # Get serial port from user input (works on both Windows and Mac)
+    port = get_serial_port_input()
+
     collect_integrated_data(
-        port="COM3",
+        port=port,
         num_iterations=100000,
         sleep_time=0.05,
         batch_size=100,

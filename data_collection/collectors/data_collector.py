@@ -1,6 +1,11 @@
 from rpi.src.serial.port_accessor import PortAccessor, PortEvent
 from data_collection.utils.serial_monitor import register_monitor
-from data_collection.utils.user_paths import get_user_input, get_user_paths, print_user_paths
+from data_collection.utils.user_paths import (
+    get_user_input,
+    get_user_paths,
+    print_user_paths,
+    get_serial_port_input,
+)
 
 import random
 import csv
@@ -122,4 +127,8 @@ def collect_data(
 if __name__ == "__main__":
     # Get username from user input
     username = get_user_input()
-    collect_data(username=username)
+
+    # Get serial port from user input (works on both Windows and Mac)
+    port = get_serial_port_input()
+
+    collect_data(port=port, username=username)
