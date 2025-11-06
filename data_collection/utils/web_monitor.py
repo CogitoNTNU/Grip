@@ -49,6 +49,11 @@ class WebMonitor:
     def _setup_routes(self):
         """Setup Flask routes."""
 
+        @self.app.route('/test')
+        def test():
+            """Test endpoint."""
+            return "Flask is working! ✓"
+
         @self.app.route('/')
         def index():
             """Serve main monitor page."""
@@ -138,94 +143,35 @@ class WebMonitor:
         return """<!DOCTYPE html>
 <html>
 <head>
-    <title>Grip Sensor Monitor</title>
+    <title>Grip Sensor Monitor - TEST</title>
     <meta charset="utf-8">
-    <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.27.0/plotly.min.js"></script>
     <style>
-        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; }
-        h1 { text-align: center; margin-bottom: 10px; }
-        .status { text-align: center; margin-bottom: 20px; font-size: 14px; color: #888; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1600px; margin: 0 auto; }
-        .chart { background: #2a2a2a; border-radius: 8px; padding: 10px; height: 350px; }
-        .loading { text-align: center; padding: 40px; color: #888; }
+        body { margin: 0; padding: 40px; font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; }
+        h1 { color: #10b981; }
+        .info { background: #2a2a2a; padding: 20px; border-radius: 8px; margin: 20px 0; }
     </style>
 </head>
 <body>
-    <h1>🎮 Grip Sensor Monitor</h1>
-    <div class="status">Samples: <span id="sample-count">0</span> | Status: <span id="status">Connecting...</span></div>
-    <div class="grid">
-        <div id="chart1" class="chart"></div>
-        <div id="chart2" class="chart"></div>
-        <div id="chart3" class="chart"></div>
-        <div id="chart4" class="chart"></div>
+    <h1>✓ Flask & HTML Working!</h1>
+    <div class="info">
+        <p><strong>Test Status:</strong> HTML rendering successful</p>
+        <p><strong>Samples:</strong> <span id="count">0</span></p>
+        <p><strong>Next:</strong> Testing JavaScript...</p>
     </div>
     <script>
-    (function() {
-        try {
-            console.log('Initializing plots...');
-            const layout = {
-                margin: { l: 50, r: 30, t: 40, b: 40 },
-                paper_bgcolor: '#2a2a2a',
-                plot_bgcolor: '#1a1a1a',
-                font: { color: '#fff' },
-                xaxis: { title: 'Samples', gridcolor: '#444' },
-                yaxis: { title: 'Value', range: [0, 1023], gridcolor: '#444' },
-                showlegend: true,
-                legend: { x: 0.7, y: 1 }
-            };
+        console.log('JavaScript is loading...');
+        document.getElementById('count').textContent = 'JS Works!';
+        console.log('JavaScript loaded successfully!');
 
-            const sensors = [
-                { id: 'chart1', title: 'Sensor 4', raw: 'sensor4_raw', env: 'sensor4_env' },
-                { id: 'chart2', title: 'Sensor 3', raw: 'sensor3_raw', env: 'sensor3_env' },
-                { id: 'chart3', title: 'Sensor 2', raw: 'sensor2_raw', env: 'sensor2_env' },
-                { id: 'chart4', title: 'Sensor 1', raw: 'sensor1_raw', env: 'sensor1_env' }
-            ];
-
-            sensors.forEach(sensor => {
-                const data = [
-                    { y: [], name: 'Raw', line: { color: '#3b82f6', width: 1 } },
-                    { y: [], name: 'Processed', line: { color: '#10b981', width: 2 } }
-                ];
-                Plotly.newPlot(sensor.id, data, {...layout, title: sensor.title}, { displayModeBar: false, responsive: true });
-            });
-
-            console.log('Connecting to SSE stream...');
-            const eventSource = new EventSource('/stream');
-
-            eventSource.onopen = function() {
-                console.log('SSE connected');
-                document.getElementById('status').textContent = 'Connected';
-                document.getElementById('status').style.color = '#10b981';
-            };
-
-            eventSource.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    document.getElementById('sample-count').textContent = data.sample_count;
-
-                    sensors.forEach(sensor => {
-                        const rawData = data.buffers[sensor.raw] || [];
-                        const envData = data.buffers[sensor.env] || [];
-                        if (rawData.length > 0) {
-                            const x = Array.from({length: rawData.length}, (_, i) => i);
-                            Plotly.update(sensor.id, { y: [rawData, envData], x: [x, x] }, {}, [0, 1]);
-                        }
-                    });
-                } catch(e) {
-                    console.error('Error updating plots:', e);
-                }
-            };
-
-            eventSource.onerror = function() {
-                console.error('SSE connection error');
-                document.getElementById('status').textContent = 'Connection Error';
-                document.getElementById('status').style.color = '#ef4444';
-            };
-        } catch(e) {
-            console.error('Initialization error:', e);
-            document.body.innerHTML = '<div class="loading">Error: ' + e.message + '</div>';
-        }
-    })();
+        // Test SSE connection
+        const es = new EventSource('/stream');
+        es.onopen = () => console.log('SSE connected');
+        es.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            document.getElementById('count').textContent = data.sample_count;
+            console.log('SSE data received:', data.sample_count);
+        };
+        es.onerror = () => console.error('SSE error');
     </script>
 </body>
 </html>"""
