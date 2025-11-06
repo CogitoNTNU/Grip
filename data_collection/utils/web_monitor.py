@@ -140,7 +140,7 @@ class WebMonitor:
 <head>
     <title>Grip Sensor Monitor</title>
     <meta charset="utf-8">
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.27.0/plotly.min.js"></script>
     <style>
         body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; }
         h1 { text-align: center; margin-bottom: 10px; }
