@@ -14,6 +14,7 @@ dependencies = [
     "pyqtgraph>=0.13.7",
     "pyserial>=3.5",
     "pyside6>=6.9.3",
+    "scikit-learn>=1.7.2",
     "torch>=2.9.0",
 ]
 

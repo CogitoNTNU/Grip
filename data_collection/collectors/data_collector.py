@@ -1,7 +1,6 @@
 from rpi.src.serial.port_accessor import PortAccessor, PortEvent
 from data_collection.utils.serial_monitor import register_monitor
 
-import time
 import random
 import csv
 from pathlib import Path
@@ -102,7 +101,7 @@ def collect_data(
             row = [datetime.now().isoformat(), i] + values
             writer.writerow(row)
 
-            time.sleep(sleep_time)
+            # time.sleep(sleep_time)
 
     handle.stop()
     pa.close()

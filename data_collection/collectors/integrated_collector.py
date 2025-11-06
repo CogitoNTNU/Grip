@@ -1,4 +1,5 @@
 import os
+
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 import csv
@@ -20,10 +21,14 @@ from data_collection.calibration.ui_utils import (
     draw_collection_status_bar,
     print_startup_banner,
 )
+
+
 def create_csv_file(data_dir):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_file = data_dir / f"integrated_data_{timestamp}.csv"
     return csv_file
+
+
 def write_csv_header(writer: csv.writer) -> None:
     header = [
         "timestamp",
@@ -45,22 +50,31 @@ def write_csv_header(writer: csv.writer) -> None:
         "hand_label",
     ]
     writer.writerow(header)
+
+
 def get_hand_data(detector, frame):
     hand_label = "None"
     finger_values = [0.0] * 6
     if not detector.results.multi_hand_landmarks:
         return hand_label, finger_values
+
     lmList = detector.findPosition(frame, handNo=0, draw=False)
     hand_label = detector.checkLeftRight(handNo=0)
+
     if len(lmList) == 0:
         return hand_label if hand_label else "None", finger_values
-    raw_values = detector.getRawFingerValues()
-    if len(raw_values) >= 6:
-        finger_values = raw_values[:6]
+
+    fingers = detector.fingersUp()
+    if len(fingers) >= 6:
+        finger_values = fingers[:6]
+
     return hand_label, finger_values
+
+
 def draw_hand_ui(detector, frame, hand_label):
     if not detector.results.multi_hand_landmarks:
         return
+
     lmList = detector.findPosition(frame, handNo=0, draw=False)
     if len(lmList) != 0:
         fingers = detector.fingersUp(handNo=0)
@@ -70,6 +84,8 @@ def draw_hand_ui(detector, frame, hand_label):
             detector.calibration_manager.is_calibrated,
             detector.calibration_manager.current_hand_label,
         )
+
+
 def collect_integrated_data(
     port: str = "MOCK",
     num_iterations: int = 1000,
@@ -100,25 +116,32 @@ def collect_integrated_data(
     latest_sensor_values = ["0"] * 8
     batch_buffer = []
     should_exit = False
+
     try:
         with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
             write_csv_header(writer)
+
             while sample_count < num_iterations and not should_exit:
                 success, frame = cap.read()
+
                 if not success:
                     print("Failed to capture video.")
                     break
+
                 frame = cv2.flip(frame, 1)
                 frame = detector.findHands(frame)
                 key = cv2.waitKey(1) & 0xFF
+
                 try:
                     while not subscription.queue.empty():
                         payload = subscription.queue.get_nowait()
                         latest_sensor_values = parse_port_event(payload)
+
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
                     pass
+
                 hand_label, finger_values = get_hand_data(detector, frame)
                 draw_hand_ui(detector, frame, hand_label)
                 draw_sensor_data_panel(frame, latest_sensor_values[:8])
@@ -152,20 +175,25 @@ def collect_integrated_data(
                         break
                     time.sleep(sleep_time)
                 cv2.imshow("Integrated Data Collection", frame)
+
                 if key == ord(" "):
                     is_collecting = not is_collecting
                     status = "started" if is_collecting else "paused"
                     print(f"\nData collection {status}")
+
                 elif key == ord("q") or key == ord("Q"):
                     should_exit = True
                     print("\nShutting down gracefully...")
+
                     if batch_buffer:
                         print(f"Saving remaining {len(batch_buffer)} samples...")
                         writer.writerows(batch_buffer)
                         f.flush()
                         batch_buffer.clear()
+
                     print(f"Total samples collected: {sample_count}")
                     break
+
     except KeyboardInterrupt:
         print("\n\nInterrupted by user (Ctrl+C)")
         if batch_buffer:
@@ -175,6 +203,7 @@ def collect_integrated_data(
                 writer.writerows(batch_buffer)
                 batch_buffer.clear()
         print(f"Total samples collected: {sample_count}")
+
     except Exception as e:
         print(f"\nError during collection: {e}")
         if batch_buffer:
@@ -185,6 +214,7 @@ def collect_integrated_data(
                     writer.writerows(batch_buffer)
                     batch_buffer.clear()
                 print("Data saved successfully")
+
             except Exception as save_error:
                 print(f"Failed to save remaining data: {save_error}")
     finally:
@@ -212,7 +242,9 @@ def collect_integrated_data(
         print(f"\nData saved to {csv_file}")
         print(f"Final sample count: {sample_count}")
         print("Shutdown complete.")
+
+
 if __name__ == "__main__":
     collect_integrated_data(
-        port="MOCK", num_iterations=1000, sleep_time=0.05, batch_size=100
+        port="COM3", num_iterations=100000, sleep_time=0.05, batch_size=100
     )

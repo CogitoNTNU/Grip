@@ -8,6 +8,7 @@ from typing import Any, Callable, Generator, Literal, Optional
 
 import serial
 from serial import SerialException
+from .mock_port import MockPort
 
 Direction = Literal["in", "out"]
 
@@ -136,8 +137,6 @@ class PortAccessor:
             try:
                 # TODO: Split this into a separate PortAccessor for mocking
                 if self.port.upper() == "MOCK":
-                    from src.serial.mock_port import MockPort
-
                     with self._lock:
                         self._serial = MockPort(
                             stream_fn=self._mock_stream_fn, **self.kwargs
