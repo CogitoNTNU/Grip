@@ -11,6 +11,8 @@ import serial.tools.list_ports
 def list_existing_users(data_root: str = "data") -> list[str]:
     """List all existing users by scanning the data directory.
 
+    Only includes directories that have the user structure (calibration/ or raw/ subdirectories).
+
     Args:
         data_root: Root data directory (default: "data")
 
@@ -24,7 +26,11 @@ def list_existing_users(data_root: str = "data") -> list[str]:
     users = []
     for item in data_path.iterdir():
         if item.is_dir() and not item.name.startswith("."):
-            users.append(item.name)
+            # Check if this directory has user structure (calibration or raw subdirectories)
+            has_calibration = (item / "calibration").exists()
+            has_raw = (item / "raw").exists()
+            if has_calibration or has_raw:
+                users.append(item.name)
 
     return sorted(users)
 

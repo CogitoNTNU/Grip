@@ -101,7 +101,7 @@ def collect_integrated_data(
     print_user_paths(username, calibration_dir, raw_data_dir)
 
     csv_file = create_csv_file(raw_data_dir)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0)  # Cross-platform camera capture
     detector = HandDetector(maxHands=1, use_calibration=True, calibration_dir=str(calibration_dir))
     workflow = CalibrationWorkflow()
     print_startup_banner()
