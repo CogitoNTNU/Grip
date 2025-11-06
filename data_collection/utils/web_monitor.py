@@ -145,35 +145,94 @@ class WebMonitor:
         return """<!DOCTYPE html>
 <html>
 <head>
-    <title>Grip Sensor Monitor - TEST</title>
+    <title>Grip Sensor Monitor</title>
     <meta charset="utf-8">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        body { margin: 0; padding: 40px; font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; }
-        h1 { color: #10b981; }
-        .info { background: #2a2a2a; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; }
+        h1 { text-align: center; margin: 10px 0; font-size: 24px; }
+        .status { text-align: center; margin-bottom: 20px; font-size: 14px; color: #888; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1800px; margin: 0 auto; }
+        .chart-container { background: #2a2a2a; border-radius: 8px; padding: 15px; height: 300px; }
+        canvas { max-height: 270px; }
     </style>
 </head>
 <body>
-    <h1>✓ Flask & HTML Working!</h1>
-    <div class="info">
-        <p><strong>Test Status:</strong> HTML rendering successful</p>
-        <p><strong>Samples:</strong> <span id="count">0</span></p>
-        <p><strong>Next:</strong> Testing JavaScript...</p>
+    <h1>🎮 Grip Sensor Monitor</h1>
+    <div class="status">Samples: <span id="count">0</span> | Status: <span id="status" style="color: #f59e0b;">Connecting...</span></div>
+    <div class="grid">
+        <div class="chart-container"><canvas id="chart1"></canvas></div>
+        <div class="chart-container"><canvas id="chart2"></canvas></div>
+        <div class="chart-container"><canvas id="chart3"></canvas></div>
+        <div class="chart-container"><canvas id="chart4"></canvas></div>
     </div>
     <script>
-        console.log('JavaScript is loading...');
-        document.getElementById('count').textContent = 'JS Works!';
-        console.log('JavaScript loaded successfully!');
+        const maxPoints = 100;
+        const chartConfig = {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: { display: true, grid: { color: '#444' }, ticks: { color: '#888' } },
+                    y: { min: 0, max: 1023, grid: { color: '#444' }, ticks: { color: '#888' } }
+                },
+                plugins: { legend: { labels: { color: '#fff' } } }
+            }
+        };
 
-        // Test SSE connection
-        const es = new EventSource('/stream');
-        es.onopen = () => console.log('SSE connected');
-        es.onmessage = (e) => {
+        const charts = [
+            { id: 'chart1', title: 'Sensor 4', raw: 'sensor4_raw', env: 'sensor4_env' },
+            { id: 'chart2', title: 'Sensor 3', raw: 'sensor3_raw', env: 'sensor3_env' },
+            { id: 'chart3', title: 'Sensor 2', raw: 'sensor2_raw', env: 'sensor2_env' },
+            { id: 'chart4', title: 'Sensor 1', raw: 'sensor1_raw', env: 'sensor1_env' }
+        ].map(sensor => {
+            const ctx = document.getElementById(sensor.id).getContext('2d');
+            return {
+                ...sensor,
+                chart: new Chart(ctx, {
+                    ...chartConfig,
+                    data: {
+                        labels: [],
+                        datasets: [
+                            { label: 'Raw', data: [], borderColor: '#3b82f6', borderWidth: 1, tension: 0.1 },
+                            { label: 'Processed', data: [], borderColor: '#10b981', borderWidth: 2, tension: 0.1 }
+                        ]
+                    },
+                    options: { ...chartConfig.options, plugins: { title: { display: true, text: sensor.title, color: '#fff' } } }
+                })
+            };
+        });
+
+        const eventSource = new EventSource('/stream');
+        eventSource.onopen = () => {
+            document.getElementById('status').textContent = 'Connected';
+            document.getElementById('status').style.color = '#10b981';
+        };
+
+        eventSource.onmessage = (e) => {
             const data = JSON.parse(e.data);
             document.getElementById('count').textContent = data.sample_count;
-            console.log('SSE data received:', data.sample_count);
+
+            charts.forEach(({ chart, raw, env }) => {
+                const rawData = data.buffers[raw] || [];
+                const envData = data.buffers[env] || [];
+
+                if (rawData.length > 0) {
+                    const labels = Array.from({length: rawData.length}, (_, i) => i);
+                    chart.data.labels = labels;
+                    chart.data.datasets[0].data = rawData.slice(-maxPoints);
+                    chart.data.datasets[1].data = envData.slice(-maxPoints);
+                    chart.update('none');
+                }
+            });
         };
-        es.onerror = () => console.error('SSE error');
+
+        eventSource.onerror = () => {
+            document.getElementById('status').textContent = 'Error';
+            document.getElementById('status').style.color = '#ef4444';
+        };
     </script>
 </body>
 </html>"""
