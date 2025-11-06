@@ -10,9 +10,12 @@ from data_collection.calibration.ui_utils import (
 )
 
 
-def auto_load_calibration(detector):
+def auto_load_calibration(detector, calibration_dir=None):
     current_hand = None
-    calibration_dir = Path("data/calibration")
+    if calibration_dir is None:
+        calibration_dir = Path("data/calibration")
+    else:
+        calibration_dir = Path(calibration_dir)
 
     if calibration_dir.exists():
         for hand in ["Right", "Left"]:
@@ -65,7 +68,7 @@ def complete_calibration(detector, workflow, hand_label):
 
 
 def run_calibration_loop(
-    cap, detector, workflow, window_name="Integrated Data Collection"
+    cap, detector, workflow, window_name="Integrated Data Collection", calibration_dir=None
 ):
     print("\n" + "=" * 60)
     print("CALIBRATION PHASE")
@@ -74,7 +77,7 @@ def run_calibration_loop(
     print("Press 'Q' to skip calibration")
     print("=" * 60)
 
-    current_hand = auto_load_calibration(detector)
+    current_hand = auto_load_calibration(detector, calibration_dir)
 
     while True:
         success, frame = cap.read()

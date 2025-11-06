@@ -1,25 +1,33 @@
 import os
+import sys
+import webbrowser
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
+
 import cv2
 import csv
 import time
+from pathlib import Path
 from datetime import datetime
 from data_collection.vision.hand_tracking import HandDetector
 from data_collection.calibration.calibration_workflow import CalibrationWorkflow
 from data_collection.calibration.calibration_helpers import run_calibration_loop
 from rpi.src.serial.port_accessor import PortAccessor
-from data_collection.utils.serial_monitor import register_monitor
-from data_collection.collectors.data_collector import (
-    create_data_directory,
-    parse_port_event,
-)
+from data_collection.collectors.data_collector import parse_port_event
+from data_collection.utils.arduino_parser import parse_arduino_format
+from data_collection.utils.web_monitor import WebMonitor
 from data_collection.calibration.ui_utils import (
     draw_hand_info,
     draw_calibration_status,
     draw_sensor_data_panel,
     draw_collection_status_bar,
     print_startup_banner,
+)
+from data_collection.utils.user_paths import (
+    get_user_input,
+    get_user_paths,
+    print_user_paths,
+    get_serial_port_input,
 )
 
 
@@ -91,14 +99,18 @@ def collect_integrated_data(
     num_iterations: int = 1000,
     sleep_time: float = 0.05,
     batch_size: int = 100,
+    username: str = "default",
 ) -> None:
-    data_dir = create_data_directory()
-    csv_file = create_csv_file(data_dir)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    detector = HandDetector(maxHands=1, use_calibration=True)
+    # Get user-specific paths
+    calibration_dir, raw_data_dir, processed_data_dir = get_user_paths(username)
+    print_user_paths(username, calibration_dir, raw_data_dir)
+
+    csv_file = create_csv_file(raw_data_dir)
+    cap = cv2.VideoCapture(0)  # Cross-platform camera capture
+    detector = HandDetector(maxHands=1, use_calibration=True, calibration_dir=str(calibration_dir))
     workflow = CalibrationWorkflow()
     print_startup_banner()
-    run_calibration_loop(cap, detector, workflow, "Integrated Data Collection")
+    run_calibration_loop(cap, detector, workflow, "Integrated Data Collection", calibration_dir=str(calibration_dir))
     print("\n" + "=" * 60)
     print("DATA COLLECTION PHASE")
     print("=" * 60)
@@ -107,10 +119,22 @@ def collect_integrated_data(
     print("Press 'SPACE' to start/pause collection")
     print("Press 'Q' to quit and save")
     print("=" * 60)
-    pa = PortAccessor(port=port)
+    pa = PortAccessor(port=port, baudrate=115200)
     pa.open()
-    subscription = pa.subscribe(max_queue=100)
-    handle = register_monitor(pa, fs=1000, title="Sensor Monitor", plot_out=False)
+    subscription = pa.subscribe(max_queue=20)  # Smaller queue for lower latency
+
+    # Start web-based monitor (browser)
+    web_monitor = None
+    try:
+        web_monitor = WebMonitor(max_samples=300)
+        web_monitor.start(port=5001)  # Changed to 5001 to avoid conflicts
+        time.sleep(1)  # Give server time to start
+        webbrowser.open('http://localhost:5001')
+        print("✓ Sensor monitor started at http://localhost:5001")
+    except Exception as e:
+        print(f"⚠ Warning: Could not start web monitor: {e}")
+        print("  (Data collection will continue without live graphs)")
+
     is_collecting = False
     sample_count = 0
     latest_sensor_values = ["0"] * 8
@@ -133,14 +157,32 @@ def collect_integrated_data(
                 frame = detector.findHands(frame)
                 key = cv2.waitKey(1) & 0xFF
 
+                # Read ALL sensor data from queue and push to monitor
                 try:
+                    queue_count = 0
                     while not subscription.queue.empty():
                         payload = subscription.queue.get_nowait()
                         latest_sensor_values = parse_port_event(payload)
+                        queue_count += 1
+
+                        # Debug: print first few values
+                        if queue_count == 1 and sample_count < 5:
+                            print(f"First sensor data: {latest_sensor_values}")
+
+                        # Push each reading to web monitor immediately
+                        if web_monitor and len(latest_sensor_values) == 8:
+                            web_monitor.push_data(latest_sensor_values)
+                        elif web_monitor:
+                            print(f"Warning: Got {len(latest_sensor_values)} values (expected 8)")
+
+                    # Debug: print queue activity regularly
+                    if queue_count > 0 and sample_count % 10 == 0:
+                        print(f"Queue: {queue_count} items processed | Sample: {sample_count} | Values: {latest_sensor_values[:4]}...")
 
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
-                    pass
+                    import traceback
+                    traceback.print_exc()
 
                 hand_label, finger_values = get_hand_data(detector, frame)
                 draw_hand_ui(detector, frame, hand_label)
@@ -173,7 +215,6 @@ def collect_integrated_data(
                             f"\nCollection complete! {sample_count} samples collected."
                         )
                         break
-                    time.sleep(sleep_time)
                 cv2.imshow("Integrated Data Collection", frame)
 
                 if key == ord(" "):
@@ -219,10 +260,11 @@ def collect_integrated_data(
                 print(f"Failed to save remaining data: {save_error}")
     finally:
         print("\nCleaning up resources...")
-        try:
-            handle.stop()
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
+        if web_monitor is not None:
+            try:
+                web_monitor.stop()
+            except Exception as e:
+                print(f"Error stopping web monitor: {e}")
         try:
             pa.unsubscribe(subscription)
         except Exception as e:
@@ -245,6 +287,16 @@ def collect_integrated_data(
 
 
 if __name__ == "__main__":
+    # Get username from user input
+    username = get_user_input()
+
+    # Get serial port from user input (works on both Windows and Mac)
+    port = get_serial_port_input()
+
     collect_integrated_data(
-        port="COM3", num_iterations=100000, sleep_time=0.05, batch_size=100
+        port=port,
+        num_iterations=100000,
+        sleep_time=0.05,
+        batch_size=100,
+        username=username
     )

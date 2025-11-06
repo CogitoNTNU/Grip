@@ -1,5 +1,11 @@
 from rpi.src.serial.port_accessor import PortAccessor, PortEvent
-from data_collection.utils.serial_monitor import register_monitor
+from data_collection.utils.user_paths import (
+    get_user_input,
+    get_user_paths,
+    print_user_paths,
+    get_serial_port_input,
+)
+from data_collection.utils.arduino_parser import parse_arduino_format
 
 import random
 import csv
@@ -25,11 +31,17 @@ def stream() -> Generator[Any, None, None]:
         yield (",".join([str(v) for v in values]) + "\n").encode("utf-8")
 
 
-def create_data_directory() -> Path:
-    """Create and return the data directory path."""
-    data_dir = Path("data")
-    data_dir.mkdir(exist_ok=True)
-    return data_dir
+def create_data_directory(username: str = "default") -> Path:
+    """Create and return the data directory path for a specific user.
+
+    Args:
+        username: Username for data separation (default: "default")
+
+    Returns:
+        Path to the raw data directory for the user
+    """
+    _, raw_data_dir, _ = get_user_paths(username)
+    return raw_data_dir
 
 
 def create_csv_file(data_dir: Path) -> Path:
@@ -63,13 +75,23 @@ def parse_payload(payload: bytes) -> list[str]:
 
 
 def parse_port_event(event: PortEvent) -> list[str]:
-    """Parse the PortEvent data and return a list of values."""
-    data_str = event.data.decode("utf-8").strip()
+    """Parse the PortEvent data and return a list of values.
+
+    Supports new Arduino format: S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env
+    Falls back to CSV format if parsing fails.
+    """
+    # Try new Arduino format first
+    parsed = parse_arduino_format(event.data)
+    if parsed is not None:
+        return [str(v) for v in parsed]
+
+    # Fallback to simple CSV split
+    data_str = event.data.decode("utf-8", errors='ignore').strip()
     return data_str.split(",")
 
 
 def collect_data(
-    port: str = "MOCK", num_iterations: int = 5000, sleep_time: float = 0.05
+    port: str = "MOCK", num_iterations: int = 5000, sleep_time: float = 0.05, username: str = "default"
 ) -> None:
     """
     Collect data from the port and write it to a CSV file.
@@ -78,16 +100,17 @@ def collect_data(
         port: The port to connect to (default: "MOCK")
         num_iterations: Number of data points to collect (default: 5000)
         sleep_time: Time to sleep between iterations in seconds (default: 0.05)
+        username: Username for data separation (default: "default")
     """
-    data_dir = create_data_directory()
-    csv_file = create_csv_file(data_dir)
+    calibration_dir, raw_data_dir, _ = get_user_paths(username)
+    print_user_paths(username, calibration_dir, raw_data_dir)
 
-    pa: PortAccessor = PortAccessor(port=port)
+    csv_file = create_csv_file(raw_data_dir)
+
+    pa: PortAccessor = PortAccessor(port=port, baudrate=115200)
     pa.open()
 
     subscription = pa.subscribe(max_queue=100)
-
-    handle = register_monitor(pa, fs=1000, title="Throughput Monitor", plot_out=False)
 
     with open(csv_file, "w", newline="") as f:
         writer = csv.writer(f)
@@ -103,11 +126,16 @@ def collect_data(
 
             # time.sleep(sleep_time)
 
-    handle.stop()
     pa.close()
 
     print(f"Data saved to {csv_file}")
 
 
 if __name__ == "__main__":
-    collect_data()
+    # Get username from user input
+    username = get_user_input()
+
+    # Get serial port from user input (works on both Windows and Mac)
+    port = get_serial_port_input()
+
+    collect_data(port=port, username=username)
