@@ -102,7 +102,12 @@ def collect_data(
 
     subscription = pa.subscribe(max_queue=100)
 
-    handle = register_monitor(pa, fs=1000, title="Throughput Monitor", plot_out=False)
+    # Try to register monitor, but continue if it fails (Qt issues on some systems)
+    handle = None
+    try:
+        handle = register_monitor(pa, fs=1000, title="Throughput Monitor", plot_out=False)
+    except Exception as e:
+        print(f"Warning: Could not initialize monitor (continuing without it): {e}")
 
     with open(csv_file, "w", newline="") as f:
         writer = csv.writer(f)
@@ -118,7 +123,8 @@ def collect_data(
 
             # time.sleep(sleep_time)
 
-    handle.stop()
+    if handle is not None:
+        handle.stop()
     pa.close()
 
     print(f"Data saved to {csv_file}")

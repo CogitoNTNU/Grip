@@ -118,7 +118,14 @@ def collect_integrated_data(
     pa = PortAccessor(port=port)
     pa.open()
     subscription = pa.subscribe(max_queue=100)
-    handle = register_monitor(pa, fs=1000, title="Sensor Monitor", plot_out=False)
+
+    # Try to register monitor, but continue if it fails (Qt issues on some systems)
+    handle = None
+    try:
+        handle = register_monitor(pa, fs=1000, title="Sensor Monitor", plot_out=False)
+    except Exception as e:
+        print(f"Warning: Could not initialize monitor (continuing without it): {e}")
+
     is_collecting = False
     sample_count = 0
     latest_sensor_values = ["0"] * 8
@@ -227,10 +234,11 @@ def collect_integrated_data(
                 print(f"Failed to save remaining data: {save_error}")
     finally:
         print("\nCleaning up resources...")
-        try:
-            handle.stop()
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
+        if handle is not None:
+            try:
+                handle.stop()
+            except Exception as e:
+                print(f"Error during cleanup: {e}")
         try:
             pa.unsubscribe(subscription)
         except Exception as e:
