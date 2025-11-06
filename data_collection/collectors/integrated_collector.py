@@ -1,11 +1,8 @@
 import os
 import sys
+import webbrowser
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
-
-# Fix Qt platform plugin issues on Mac
-if sys.platform == "darwin":  # macOS
-    os.environ["QT_MAC_WANTS_LAYER"] = "1"
 
 import cv2
 import csv
@@ -16,9 +13,9 @@ from data_collection.vision.hand_tracking import HandDetector
 from data_collection.calibration.calibration_workflow import CalibrationWorkflow
 from data_collection.calibration.calibration_helpers import run_calibration_loop
 from rpi.src.serial.port_accessor import PortAccessor
-from data_collection.utils.serial_monitor import register_monitor
 from data_collection.collectors.data_collector import parse_port_event
 from data_collection.utils.arduino_parser import parse_arduino_format
+from data_collection.utils.web_monitor import WebMonitor
 from data_collection.calibration.ui_utils import (
     draw_hand_info,
     draw_calibration_status,
@@ -126,19 +123,16 @@ def collect_integrated_data(
     pa.open()
     subscription = pa.subscribe(max_queue=100)
 
-    # Register monitor to display sensor data in real-time
-    handle = None
+    # Start web-based monitor (browser)
+    web_monitor = None
     try:
-        handle = register_monitor(
-            pa,
-            parse_fn_in=parse_arduino_format,
-            fs=1000,
-            title="Grip Sensor Monitor",
-            plot_out=False
-        )
-        print("✓ Sensor monitor started")
+        web_monitor = WebMonitor(max_samples=300)
+        web_monitor.start(port=5000)
+        time.sleep(1)  # Give server time to start
+        webbrowser.open('http://localhost:5000')
+        print("✓ Sensor monitor started at http://localhost:5000")
     except Exception as e:
-        print(f"⚠ Warning: Could not start monitor: {e}")
+        print(f"⚠ Warning: Could not start web monitor: {e}")
         print("  (Data collection will continue without live graphs)")
 
     is_collecting = False
@@ -167,6 +161,10 @@ def collect_integrated_data(
                     while not subscription.queue.empty():
                         payload = subscription.queue.get_nowait()
                         latest_sensor_values = parse_port_event(payload)
+
+                        # Push to web monitor for live graphs
+                        if web_monitor and len(latest_sensor_values) == 8:
+                            web_monitor.push_data(latest_sensor_values)
 
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
@@ -249,11 +247,11 @@ def collect_integrated_data(
                 print(f"Failed to save remaining data: {save_error}")
     finally:
         print("\nCleaning up resources...")
-        if handle is not None:
+        if web_monitor is not None:
             try:
-                handle.stop()
+                web_monitor.stop()
             except Exception as e:
-                print(f"Error stopping monitor: {e}")
+                print(f"Error stopping web monitor: {e}")
         try:
             pa.unsubscribe(subscription)
         except Exception as e:
