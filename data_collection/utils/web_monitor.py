@@ -80,24 +80,32 @@ class WebMonitor:
                    Where env0,raw0 = Sensor 4, env1,raw1 = Sensor 3, etc.
         """
         if len(values) != 8:
+            print(f"Warning: Expected 8 values, got {len(values)}")
             return
 
-        with self.lock:
-            # Unpack values: env0,raw0,env1,raw1,env2,raw2,env3,raw3
-            # Sensor 4
-            self.buffers['sensor4_env'].append(int(values[0]))
-            self.buffers['sensor4_raw'].append(int(values[1]))
-            # Sensor 3
-            self.buffers['sensor3_env'].append(int(values[2]))
-            self.buffers['sensor3_raw'].append(int(values[3]))
-            # Sensor 2
-            self.buffers['sensor2_env'].append(int(values[4]))
-            self.buffers['sensor2_raw'].append(int(values[5]))
-            # Sensor 1
-            self.buffers['sensor1_env'].append(int(values[6]))
-            self.buffers['sensor1_raw'].append(int(values[7]))
+        try:
+            with self.lock:
+                # Unpack values: env0,raw0,env1,raw1,env2,raw2,env3,raw3
+                # Sensor 4
+                self.buffers['sensor4_env'].append(int(values[0]))
+                self.buffers['sensor4_raw'].append(int(values[1]))
+                # Sensor 3
+                self.buffers['sensor3_env'].append(int(values[2]))
+                self.buffers['sensor3_raw'].append(int(values[3]))
+                # Sensor 2
+                self.buffers['sensor2_env'].append(int(values[4]))
+                self.buffers['sensor2_raw'].append(int(values[5]))
+                # Sensor 1
+                self.buffers['sensor1_env'].append(int(values[6]))
+                self.buffers['sensor1_raw'].append(int(values[7]))
 
-            self.sample_count += 1
+                self.sample_count += 1
+
+                # Debug print every 50 samples
+                if self.sample_count % 50 == 0:
+                    print(f"Web monitor: {self.sample_count} samples buffered")
+        except (ValueError, IndexError) as e:
+            print(f"Error pushing data to web monitor: {e}, values: {values}")
 
     def start(self, port: int = 5000):
         """Start Flask server in background thread.

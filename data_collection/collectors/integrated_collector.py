@@ -165,6 +165,9 @@ def collect_integrated_data(
                         # Push to web monitor for live graphs
                         if web_monitor and len(latest_sensor_values) == 8:
                             web_monitor.push_data(latest_sensor_values)
+                        elif web_monitor and len(latest_sensor_values) != 8:
+                            if sample_count % 100 == 0:  # Only print occasionally
+                                print(f"Debug: Got {len(latest_sensor_values)} values (expected 8): {latest_sensor_values}")
 
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
