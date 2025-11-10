@@ -18,6 +18,7 @@ dependencies = [
     "scikit-learn>=1.7.2",
     "tensorflow>=2.19.1",
     "torch>=2.9.0",
+    "tqdm>=4.67.1",
 ]
 
 
