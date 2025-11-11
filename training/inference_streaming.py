@@ -123,6 +123,10 @@ class StreamingInference:
 
         self.window_buffer = deque(maxlen=window_size)
 
+        # Initialize streaming high-pass filter for env channels
+        fs = 1.0 / 0.03446
+        self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
+
         # Define neighbor relationships for spatial features (matching notebook)
         self.neighbors = {1: [], 2: [3], 3: [2, 4], 4: [3]}
 
@@ -150,11 +154,12 @@ class StreamingInference:
 
     def process_sample(self, raw_sample):
         # raw_sample contains: [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
-        # env values are already high-pass filtered in load_test_data()
-        env_values = raw_sample[::2].copy()  # env0, env1, env2, env3
-        raw_values = raw_sample[1::2].copy()  # raw0, raw1, raw2, raw3
+        # env values are already pre-filtered with filtfilt in load_test_data()
+        # (for true streaming, we would filter here instead)
+        env_values = raw_sample[::2].copy()  # env0, env1, env2, env3 (pre-filtered)
+        raw_values = raw_sample[1::2].copy()  # raw0, raw1, raw2, raw3 (unfiltered)
 
-        # Compute spatial features
+        # Compute spatial features using FILTERED env and UNFILTERED raw
         raw_diffs, env_diffs = self.compute_spatial_features(raw_values, env_values)
 
         # Match the notebook feature order: env0, raw0, env1, raw1, env2, raw2, env3, raw3, then diffs
@@ -190,6 +195,12 @@ class StreamingInference:
 
 
 def load_test_data():
+    """Load test data WITH pre-filtering to match notebook training
+
+    NOTE: This uses filtfilt (non-causal) which is NOT suitable for true real-time streaming
+    but matches how the model was trained. For true streaming, the model would need to be
+    retrained using causal filtering (lfilter).
+    """
     from scipy.signal import butter, filtfilt
 
     def highpass(signal, fs, cutoff=0.5, order=4):
@@ -197,6 +208,7 @@ def load_test_data():
         return filtfilt(b, a, signal)
 
     dirs = ["data/martin2/raw"]
+    # dirs = ["data/afras/raw"]
 
     csv_files = []
     for d in dirs:
@@ -233,6 +245,7 @@ def load_test_data():
     df_clean = df.dropna(subset=numeric_columns)
 
     # Apply high-pass filter to env columns (matching notebook preprocessing)
+    # This uses filtfilt which is non-causal (uses future information)
     fs = 1.0 / 0.03446
     for col in ["env0", "env1", "env2", "env3"]:
         df_clean[col] = highpass(df_clean[col].values, fs, cutoff=0.5)
@@ -367,7 +380,7 @@ def main():
 
     compute_metrics(predictions, ground_truth)
 
-    visualize_predictions(predictions, ground_truth, n_samples=200)
+    visualize_predictions(predictions, ground_truth, n_samples=5000)
 
 
 if __name__ == "__main__":
