@@ -1,3 +1,23 @@
+"""
+Streaming Inference for EMG-to-Finger Position Prediction
+
+This script implements TRUE STREAMING inference with causal filtering:
+- Raw sensor data is loaded without preprocessing
+- Each sample is processed sequentially (sample-by-sample)
+- High-pass filtering uses causal lfilter (StreamingHighPassFilter)
+- No lookahead or future information is used
+- Simulates real-time sensor data arrival
+
+Key Components:
+1. StreamingHighPassFilter: Causal IIR filter with state preservation
+2. LSTMModel: 3-layer LSTM with skip connections
+3. StreamingInference: Online processing with sliding window buffer
+4. simulate_streaming: Sequential sample processing loop
+
+NOTE: Model was trained with non-causal filtfilt, so performance may differ
+from training metrics. For best results, retrain with causal filtering.
+"""
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -153,19 +173,37 @@ class StreamingInference:
         return raw_diffs, env_diffs
 
     def process_sample(self, raw_sample):
-        # raw_sample contains: [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
-        # env values are already pre-filtered with filtfilt in load_test_data()
-        # (for true streaming, we would filter here instead)
-        env_values = raw_sample[::2].copy()  # env0, env1, env2, env3 (pre-filtered)
+        """
+        Process a single incoming sample with true streaming behavior.
+
+        Args:
+            raw_sample: Array of [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
+                       All values are RAW (unfiltered) as they would come from sensors
+
+        Returns:
+            Scaled feature vector ready for windowing
+        """
+        # Extract raw sensor values
+        env_values_raw = raw_sample[
+            ::2
+        ].copy()  # env0, env1, env2, env3 (raw from sensor)
         raw_values = raw_sample[1::2].copy()  # raw0, raw1, raw2, raw3 (unfiltered)
 
+        # Apply streaming high-pass filter to env values (causal, online filtering)
+        # This uses lfilter internally, processing one sample at a time with filter state
+        env_values_filtered = np.array(
+            [self.highpass_filter.filter(env_values_raw[i], i) for i in range(4)]
+        )
+
         # Compute spatial features using FILTERED env and UNFILTERED raw
-        raw_diffs, env_diffs = self.compute_spatial_features(raw_values, env_values)
+        raw_diffs, env_diffs = self.compute_spatial_features(
+            raw_values, env_values_filtered
+        )
 
         # Match the notebook feature order: env0, raw0, env1, raw1, env2, raw2, env3, raw3, then diffs
         interleaved_sensors = []
         for i in range(4):
-            interleaved_sensors.append(env_values[i])
+            interleaved_sensors.append(env_values_filtered[i])
             interleaved_sensors.append(raw_values[i])
 
         features = np.concatenate([interleaved_sensors, raw_diffs, env_diffs])
@@ -195,18 +233,16 @@ class StreamingInference:
 
 
 def load_test_data():
-    """Load test data WITH pre-filtering to match notebook training
-
-    NOTE: This uses filtfilt (non-causal) which is NOT suitable for true real-time streaming
-    but matches how the model was trained. For true streaming, the model would need to be
-    retrained using causal filtering (lfilter).
     """
-    from scipy.signal import butter, filtfilt
+    Load test data WITHOUT pre-filtering for true streaming simulation.
 
-    def highpass(signal, fs, cutoff=0.5, order=4):
-        b, a = butter(order, cutoff / (0.5 * fs), btype="high")
-        return filtfilt(b, a, signal)
+    The data is loaded in its raw form as it would come from sensors.
+    Filtering will be applied sample-by-sample during streaming using
+    the causal StreamingHighPassFilter.
 
+    Returns:
+        DataFrame with raw sensor data (unfiltered)
+    """
     dirs = ["data/martin2/raw"]
     # dirs = ["data/afras/raw"]
 
@@ -244,11 +280,9 @@ def load_test_data():
 
     df_clean = df.dropna(subset=numeric_columns)
 
-    # Apply high-pass filter to env columns (matching notebook preprocessing)
-    # This uses filtfilt which is non-causal (uses future information)
-    fs = 1.0 / 0.03446
-    for col in ["env0", "env1", "env2", "env3"]:
-        df_clean[col] = highpass(df_clean[col].values, fs, cutoff=0.5)
+    # NO FILTERING APPLIED HERE - data remains raw as from sensors
+    # Filtering happens online in StreamingInference.process_sample()
+    # using causal lfilter to simulate true real-time streaming
 
     return df_clean
 
