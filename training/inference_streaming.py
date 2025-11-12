@@ -243,7 +243,7 @@ def load_test_data():
     Returns:
         DataFrame with raw sensor data (unfiltered)
     """
-    dirs = ["data/martin2/raw"]
+    dirs = ["data/martin3/raw"]
     # dirs = ["data/afras/raw"]
 
     csv_files = []
