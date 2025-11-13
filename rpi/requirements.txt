@@ -1,6 +1,17 @@
 # Raspberry Pi Dependencies
-# Lightweight dependencies for running on RPi
+# Dependencies for ML inference and serial communication
 
-pyserial>=3.5
-gpiozero>=2.0
+# Deep Learning
+torch>=2.0.0
+
+# Scientific Computing
 numpy>=2.0
+scipy>=1.10.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Serial Communication
+pyserial>=3.5
+
+# GPIO Control (optional, for servo motors)
+gpiozero>=2.0
