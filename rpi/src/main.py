@@ -6,7 +6,7 @@ import serial
 import torch
 
 if sys.platform == "darwin":
-    PORT = "/dev/tty.usbmodem11301"
+    PORT = "/dev/tty.usbserial-AC01XDS0"
 else:
     PORT = "/dev/ttyAMA0"
 
@@ -133,11 +133,35 @@ while True:
         if not line:
             continue
 
-        parts = line.split(",")
-        if len(parts) != 8:
+        # Parse Arduino format: S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env
+        parts = line.split(";")
+        if len(parts) != 4:
             continue
 
-        sensor_values = np.array([float(x) for x in parts], dtype=np.float32)
+        sensor_data = {}
+        for part in parts:
+            if ":" not in part:
+                continue
+            sensor_id, values = part.split(":")
+            raw, env = values.split(",")
+            sensor_data[sensor_id] = (float(raw), float(env))
+
+        # Check we got all sensors
+        if not all(s in sensor_data for s in ["S1", "S2", "S3", "S4"]):
+            continue
+
+        # Map to expected format: [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
+        # S4 = sensor 0, S3 = sensor 1, S2 = sensor 2, S1 = sensor 3
+        sensor_values = np.array([
+            sensor_data["S4"][1],  # env0
+            sensor_data["S4"][0],  # raw0
+            sensor_data["S3"][1],  # env1
+            sensor_data["S3"][0],  # raw1
+            sensor_data["S2"][1],  # env2
+            sensor_data["S2"][0],  # raw2
+            sensor_data["S1"][1],  # env3
+            sensor_data["S1"][0],  # raw3
+        ], dtype=np.float32)
         print(f"Received: {sensor_values}")
 
         features = engineer_features(sensor_values)
