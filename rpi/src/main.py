@@ -4,6 +4,7 @@ import joblib
 import numpy as np
 import serial
 import torch
+from scipy.signal import butter, lfilter, lfilter_zi
 
 if sys.platform == "darwin":
     PORT = "/dev/tty.usbserial-AC01XDS0"
@@ -93,6 +94,16 @@ model.eval()
 
 scaler = joblib.load("training/notebooks/scaler_inputs_lstm.pkl")
 
+# Design Butterworth low-pass filter for smooth servo output
+fs = 100  # Sampling rate (Hz) - Arduino sends at ~100Hz
+cutoff = 10  # Cutoff frequency (Hz) - medium smoothness
+order = 4  # Filter order
+b, a = butter(order, cutoff / (0.5 * fs), btype='low')
+
+# Initialize filter state for 6 servo channels
+filter_zi = [lfilter_zi(b, a) for _ in range(NUM_OUTPUTS)]
+filtered_output = np.zeros(NUM_OUTPUTS)
+
 
 def engineer_features(sensor_values):
     """
@@ -181,8 +192,17 @@ while True:
         with torch.no_grad():
             out = model(X)
 
-        servo = out.numpy()[0] * 1023
-        servo = np.clip((servo), 0, 1023).astype(int)
+        # Raw predictions (0-1 range)
+        raw_output = out.numpy()[0]
+
+        # Apply Butterworth filter to each servo channel
+        for i in range(NUM_OUTPUTS):
+            filtered_val, filter_zi[i] = lfilter(b, a, [raw_output[i]], zi=filter_zi[i])
+            filtered_output[i] = filtered_val[0]
+
+        # Scale to servo range and clip
+        servo = filtered_output * 1023
+        servo = np.clip(servo, 0, 1023).astype(int)
         print(f"Sent: {servo}")
 
         msg = ",".join(map(str, servo)) + "\n"
