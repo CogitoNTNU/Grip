@@ -1,22 +1,14 @@
 """
 Real-Time Streaming Inference for EMG-to-Finger Position Prediction
 
-This script implements TRUE REAL-TIME inference by reading directly from the sensor
-using the same PortAccessor interface as data collection:
-- Reads sensor data directly from Arduino/serial port
+This script implements TRUE REAL-TIME inference by reading directly from the sensor:
+- Reads sensor data directly from Arduino/serial port using pySerial
 - Processes each sample as it arrives (true streaming)
 - High-pass filtering uses causal lfilter (StreamingHighPassFilter)
 - No lookahead or future information is used
-- Displays predictions in real-time
+- Sends servo commands back to Arduino
 
-Key Components:
-1. PortAccessor: Serial port interface (same as data collection)
-2. StreamingHighPassFilter: Causal IIR filter with state preservation
-3. LSTMModel: 3-layer LSTM with skip connections
-4. RealtimeInference: Online processing with sliding window buffer
-5. Real-time visualization of predictions
-
-NOTE: Model should be trained with causal filtering for best results.
+Matches main.py's simple serial communication approach.
 """
 
 import torch
@@ -24,16 +16,11 @@ import torch.nn as nn
 import numpy as np
 import joblib
 import time
+import serial
 from scipy.signal import butter, lfilter
 from collections import deque
 import sys
 import os
-
-# Add project root to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from rpi.src.serial_config.port_accessor import PortAccessor
-from data_collection.collectors.data_collector import parse_port_event
 
 
 class StreamingHighPassFilter:
@@ -111,25 +98,7 @@ class RealtimeInference:
         self.scaler = joblib.load(scaler_path)
 
         # Initialize model
-        sensor_columns = [
-            "env0",
-            "raw0",
-            "env1",
-            "raw1",
-            "env2",
-            "raw2",
-            "env3",
-            "raw3",
-            "raw_diff1",
-            "raw_diff2",
-            "raw_diff3",
-            "raw_diff4",
-            "env_diff1",
-            "env_diff2",
-            "env_diff3",
-            "env_diff4",
-        ]
-        n_inputs = len(sensor_columns)
+        n_inputs = 16
         n_outputs = 6
 
         self.model = LSTMModel(
@@ -155,9 +124,7 @@ class RealtimeInference:
         self.window_buffer = deque(maxlen=window_size)
 
         # Initialize streaming high-pass filter for env channels
-        # fs = 1.0 / 0.03446  # Sampling frequency
         fs = 100  # 100Hz sampling rate
-
         self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
 
         # Define neighbor relationships for spatial features (matching notebook)
@@ -204,11 +171,6 @@ class RealtimeInference:
         """
         Process a single sensor sample and add it to the sliding window.
 
-        TRUE STREAMING BEHAVIOR:
-        - Applies causal high-pass filter to env channels sample-by-sample
-        - Computes spatial features from current sample only
-        - No lookahead or future information used
-
         Args:
             raw_sample: Array of 8 sensor values [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
         """
@@ -234,9 +196,9 @@ class RealtimeInference:
 
         features = np.concatenate(
             [
-                interleaved_sensors,  # [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
-                raw_diffs,  # [raw_diff1, raw_diff2, raw_diff3, raw_diff4]
-                env_diffs,  # [env_diff1, env_diff2, env_diff3, env_diff4]
+                interleaved_sensors,
+                raw_diffs,
+                env_diffs,
             ]
         )
 
@@ -257,7 +219,7 @@ class RealtimeInference:
             return None
 
         # Create window tensor
-        window_array = np.array(list(self.window_buffer))  # (window_size, n_features)
+        window_array = np.array(list(self.window_buffer))
         window_tensor = (
             torch.tensor(window_array, dtype=torch.float32).unsqueeze(0).to(self.device)
         )
@@ -271,12 +233,13 @@ class RealtimeInference:
 
         return prediction
 
-    def run_realtime(self, port="MOCK", baudrate=115200):
+    def run_realtime(self, port, baudrate=115200):
         """
-        Run real-time inference from sensor data.
+        Run real-time inference from sensor data using simple serial communication.
+        Matches main.py's approach.
 
         Args:
-            port: Serial port name (or "MOCK" for testing)
+            port: Serial port name (e.g., "COM3", "/dev/ttyAMA0")
             baudrate: Serial port baud rate
         """
         print("\n" + "=" * 60)
@@ -287,10 +250,8 @@ class RealtimeInference:
         print("Press Ctrl+C to stop")
         print("=" * 60 + "\n")
 
-        # Open serial port
-        pa = PortAccessor(port=port, baudrate=baudrate)
-        pa.open()
-        subscription = pa.subscribe(max_queue=20)
+        # Open serial port (same as main.py)
+        ser = serial.Serial(port, baudrate, timeout=0.1)
 
         start_time = time.time()
         last_display_time = start_time
@@ -301,65 +262,97 @@ class RealtimeInference:
 
         try:
             while True:
-                # Read sensor data from queue
                 try:
-                    if not subscription.queue.empty():
-                        payload = subscription.queue.get_nowait()
-                        sensor_values = parse_port_event(payload)
+                    # Read line from serial port (same as main.py)
+                    line = ser.readline().decode().strip()
 
-                        samples_received += 1
+                    if not line:
+                        continue
 
-                        # Convert to numeric
-                        if len(sensor_values) == 8:
-                            sensor_array = np.array(
-                                [float(v) for v in sensor_values], dtype=np.float32
+                    # Parse Arduino format: S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env
+                    parts = line.split(";")
+                    if len(parts) != 4:
+                        continue
+
+                    sensor_data = {}
+                    for part in parts:
+                        if ":" not in part:
+                            continue
+                        sensor_id, values = part.split(":")
+                        raw, env = values.split(",")
+                        sensor_data[sensor_id] = (float(raw), float(env))
+
+                    # Check we got all sensors
+                    if not all(s in sensor_data for s in ["S1", "S2", "S3", "S4"]):
+                        continue
+
+                    # Map to expected format: [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
+                    # S4 = sensor 0, S3 = sensor 1, S2 = sensor 2, S1 = sensor 3
+                    sensor_values = np.array(
+                        [
+                            sensor_data["S4"][1],  # env0
+                            sensor_data["S4"][0],  # raw0
+                            sensor_data["S3"][1],  # env1
+                            sensor_data["S3"][0],  # raw1
+                            sensor_data["S2"][1],  # env2
+                            sensor_data["S2"][0],  # raw2
+                            sensor_data["S1"][1],  # env3
+                            sensor_data["S1"][0],  # raw3
+                        ],
+                        dtype=np.float32,
+                    )
+
+                    samples_received += 1
+
+                    # Process sample
+                    self.process_sample(sensor_values)
+
+                    # Make prediction (only when buffer is full)
+                    prediction = self.predict()
+
+                    if prediction is not None:
+                        predictions_made += 1
+
+                        # Convert predictions [0,1] to servo values [0,1023]
+                        servo_values = (prediction * 1023).astype(int)
+                        servo_values = np.clip(servo_values, 0, 1023)
+
+                        # Send servo commands to Arduino (same as main.py)
+                        msg = ",".join(map(str, servo_values)) + "\n"
+                        ser.write(msg.encode())
+
+                        current_time = time.time()
+                        time_since_last = current_time - last_display_time
+
+                        # Display prediction every 0.5 seconds
+                        if time_since_last >= 0.5:
+                            elapsed = current_time - start_time
+                            sample_fps = (
+                                samples_received / elapsed if elapsed > 0 else 0
                             )
+                            pred_fps = predictions_made / elapsed if elapsed > 0 else 0
 
-                            # Process sample
-                            self.process_sample(sensor_array)
+                            print(
+                                f"\n[Samples: {samples_received} | Predictions: {predictions_made}]"
+                            )
+                            print(
+                                f"Sample FPS: {sample_fps:.1f} | Prediction FPS: {pred_fps:.1f}"
+                            )
+                            print("Predictions:")
+                            for i, name in enumerate(self.finger_names):
+                                bar = "█" * int(prediction[i] * 20)
+                                servo_val = servo_values[i]
+                                print(
+                                    f"  {name:<12}: {prediction[i]:.3f} {bar} (servo: {servo_val})"
+                                )
 
-                            # Make prediction (only when buffer is full)
-                            prediction = self.predict()
-
-                            if prediction is not None:
-                                predictions_made += 1
-
-                                current_time = time.time()
-                                time_since_last = current_time - last_display_time
-
-                                # Display prediction every 0.5 seconds instead of every 10 samples
-                                if time_since_last >= 0.5:
-                                    elapsed = current_time - start_time
-                                    sample_fps = (
-                                        samples_received / elapsed if elapsed > 0 else 0
-                                    )
-                                    pred_fps = (
-                                        predictions_made / elapsed if elapsed > 0 else 0
-                                    )
-
-                                    print(
-                                        f"\n[Samples: {samples_received} | Predictions: {predictions_made}]"
-                                    )
-                                    print(
-                                        f"Sample FPS: {sample_fps:.1f} | Prediction FPS: {pred_fps:.1f}"
-                                    )
-                                    print(f"Queue size: {subscription.queue.qsize()}")
-                                    print("Predictions:")
-                                    for i, name in enumerate(self.finger_names):
-                                        bar = "█" * int(prediction[i] * 20)
-                                        print(
-                                            f"  {name:<12}: {prediction[i]:.3f} {bar}"
-                                        )
-
-                                    last_display_time = current_time
+                            last_display_time = current_time
 
                 except Exception as e:
                     print(f"Error processing sample: {e}")
                     import traceback
 
                     traceback.print_exc()
-
-                # No sleep - process as fast as data arrives!
 
         except KeyboardInterrupt:
             print("\n\nStopping real-time inference...")
@@ -371,15 +364,21 @@ class RealtimeInference:
                 print(f"Average prediction rate: {predictions_made / elapsed:.1f} Hz")
 
         finally:
-            pa.close()
-            print("✓ Port closed")
+            ser.close()
+            print("✓ Serial port closed")
 
 
 def main():
     # Configuration
     model_path = "training/notebooks/best_lstm_model.pth"
     scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
-    port = "COM3"  # Change to actual port like "COM3" or "/dev/ttyUSB0"
+
+    # Hardware configuration (same as main.py)
+    if sys.platform == "darwin":
+        port = "/dev/tty.usbmodem11301"  # Mac
+    else:
+        port = "COM3"  # '/dev/ttyAMA0' Raspberry Pi
+
     baudrate = 115200
 
     # Check if files exist

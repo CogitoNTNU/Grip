@@ -99,6 +99,7 @@ class StreamingInference:
     def __init__(self, model_path, scaler_path, window_size=30, device="cpu"):
         self.window_size = window_size
         self.device = torch.device(device)
+
         self.scaler = joblib.load(scaler_path)
 
         sensor_columns = [
@@ -242,7 +243,7 @@ def load_test_data():
     Returns:
         DataFrame with raw sensor data (unfiltered)
     """
-    dirs = ["data/martin3/raw"]
+    dirs = ["data/martin2/raw"]
     # dirs = ["data/afras/raw"]
 
     csv_files = []

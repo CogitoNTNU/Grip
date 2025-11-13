@@ -1,5 +1,4 @@
 import os
-import sys
 import webbrowser
 
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
@@ -7,14 +6,12 @@ os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import cv2
 import csv
 import time
-from pathlib import Path
 from datetime import datetime
 from data_collection.vision.hand_tracking import HandDetector
 from data_collection.calibration.calibration_workflow import CalibrationWorkflow
 from data_collection.calibration.calibration_helpers import run_calibration_loop
-from rpi.src.serial.port_accessor import PortAccessor
+from rpi.src.serial_config.port_accessor import PortAccessor
 from data_collection.collectors.data_collector import parse_port_event
-from data_collection.utils.arduino_parser import parse_arduino_format
 from data_collection.utils.web_monitor import WebMonitor
 from data_collection.calibration.ui_utils import (
     draw_hand_info,
@@ -107,10 +104,18 @@ def collect_integrated_data(
 
     csv_file = create_csv_file(raw_data_dir)
     cap = cv2.VideoCapture(0)  # Cross-platform camera capture
-    detector = HandDetector(maxHands=1, use_calibration=True, calibration_dir=str(calibration_dir))
+    detector = HandDetector(
+        maxHands=1, use_calibration=True, calibration_dir=str(calibration_dir)
+    )
     workflow = CalibrationWorkflow()
     print_startup_banner()
-    run_calibration_loop(cap, detector, workflow, "Integrated Data Collection", calibration_dir=str(calibration_dir))
+    run_calibration_loop(
+        cap,
+        detector,
+        workflow,
+        "Integrated Data Collection",
+        calibration_dir=str(calibration_dir),
+    )
     print("\n" + "=" * 60)
     print("DATA COLLECTION PHASE")
     print("=" * 60)
@@ -129,7 +134,7 @@ def collect_integrated_data(
         web_monitor = WebMonitor(max_samples=300)
         web_monitor.start(port=5001)  # Changed to 5001 to avoid conflicts
         time.sleep(1)  # Give server time to start
-        webbrowser.open('http://localhost:5001')
+        webbrowser.open("http://localhost:5001")
         print("✓ Sensor monitor started at http://localhost:5001")
     except Exception as e:
         print(f"⚠ Warning: Could not start web monitor: {e}")
@@ -173,15 +178,20 @@ def collect_integrated_data(
                         if web_monitor and len(latest_sensor_values) == 8:
                             web_monitor.push_data(latest_sensor_values)
                         elif web_monitor:
-                            print(f"Warning: Got {len(latest_sensor_values)} values (expected 8)")
+                            print(
+                                f"Warning: Got {len(latest_sensor_values)} values (expected 8)"
+                            )
 
                     # Debug: print queue activity regularly
                     if queue_count > 0 and sample_count % 10 == 0:
-                        print(f"Queue: {queue_count} items processed | Sample: {sample_count} | Values: {latest_sensor_values[:4]}...")
+                        print(
+                            f"Queue: {queue_count} items processed | Sample: {sample_count} | Values: {latest_sensor_values[:4]}..."
+                        )
 
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
                     import traceback
+
                     traceback.print_exc()
 
                 hand_label, finger_values = get_hand_data(detector, frame)
@@ -298,5 +308,5 @@ if __name__ == "__main__":
         num_iterations=100000,
         sleep_time=0.05,
         batch_size=100,
-        username=username
+        username=username,
     )

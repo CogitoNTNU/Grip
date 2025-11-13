@@ -1,4 +1,4 @@
-from rpi.src.serial.port_accessor import PortAccessor, PortEvent
+from rpi.src.serial_config.port_accessor import PortAccessor, PortEvent
 from data_collection.utils.user_paths import (
     get_user_input,
     get_user_paths,
@@ -86,12 +86,15 @@ def parse_port_event(event: PortEvent) -> list[str]:
         return [str(v) for v in parsed]
 
     # Fallback to simple CSV split
-    data_str = event.data.decode("utf-8", errors='ignore').strip()
+    data_str = event.data.decode("utf-8", errors="ignore").strip()
     return data_str.split(",")
 
 
 def collect_data(
-    port: str = "MOCK", num_iterations: int = 5000, sleep_time: float = 0.05, username: str = "default"
+    port: str = "MOCK",
+    num_iterations: int = 5000,
+    sleep_time: float = 0.05,
+    username: str = "default",
 ) -> None:
     """
     Collect data from the port and write it to a CSV file.
