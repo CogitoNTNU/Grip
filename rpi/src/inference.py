@@ -97,8 +97,26 @@ class RealtimeInference:
         # Load scaler
         self.scaler = joblib.load(scaler_path)
 
-        # Initialize model
-        n_inputs = 16
+        # Initialize model (matching inference_streaming.py exactly)
+        sensor_columns = [
+            "env0",
+            "raw0",
+            "env1",
+            "raw1",
+            "env2",
+            "raw2",
+            "env3",
+            "raw3",
+            "raw_diff1",
+            "raw_diff2",
+            "raw_diff3",
+            "raw_diff4",
+            "env_diff1",
+            "env_diff2",
+            "env_diff3",
+            "env_diff4",
+        ]
+        n_inputs = len(sensor_columns)
         n_outputs = 6
 
         self.model = LSTMModel(
@@ -123,8 +141,8 @@ class RealtimeInference:
         # Initialize sliding window buffer
         self.window_buffer = deque(maxlen=window_size)
 
-        # Initialize streaming high-pass filter for env channels
-        fs = 100  # 100Hz sampling rate
+        # Initialize streaming high-pass filter for env channels (matching inference_streaming.py)
+        fs = 1.0 / 0.03446  # Same sampling rate as inference_streaming.py
         self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
 
         # Define neighbor relationships for spatial features (matching notebook)
@@ -145,7 +163,7 @@ class RealtimeInference:
         print(f"✓ Window size: {window_size}")
 
     def compute_spatial_features(self, raw_values, env_values):
-        """Compute spatial features exactly as in the notebook."""
+        """Compute spatial features exactly as in inference_streaming.py"""
         raw_diffs = []
         env_diffs = []
 
@@ -154,58 +172,57 @@ class RealtimeInference:
                 raw_diffs.append(0.0)
                 env_diffs.append(0.0)
             else:
-                raw_diff_sum = sum(
+                raw_diff_list = [
                     raw_values[base - 1] - raw_values[n - 1]
                     for n in self.neighbors[base]
-                )
-                env_diff_sum = sum(
+                ]
+                env_diff_list = [
                     env_values[base - 1] - env_values[n - 1]
                     for n in self.neighbors[base]
-                )
-                raw_diffs.append(raw_diff_sum / len(self.neighbors[base]))
-                env_diffs.append(env_diff_sum / len(self.neighbors[base]))
+                ]
+                raw_diffs.append(sum(raw_diff_list) / len(raw_diff_list))
+                env_diffs.append(sum(env_diff_list) / len(env_diff_list))
 
-        return np.array(raw_diffs), np.array(env_diffs)
+        return raw_diffs, env_diffs
 
     def process_sample(self, raw_sample):
         """
-        Process a single sensor sample and add it to the sliding window.
+        Process a single incoming sample with true streaming behavior.
+        EXACTLY matches inference_streaming.py logic.
 
         Args:
-            raw_sample: Array of 8 sensor values [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
-        """
-        # Extract raw env and raw values
-        env_values_raw = raw_sample[::2]  # [env0, env1, env2, env3]
-        raw_values = raw_sample[1::2]  # [raw0, raw1, raw2, raw3]
+            raw_sample: Array of [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
+                       All values are RAW (unfiltered) as they would come from sensors
 
-        # Apply streaming high-pass filter to env channels
+        Returns:
+            Scaled feature vector ready for windowing
+        """
+        # Extract raw sensor values
+        env_values_raw = raw_sample[
+            ::2
+        ].copy()  # env0, env1, env2, env3 (raw from sensor)
+        raw_values = raw_sample[1::2].copy()  # raw0, raw1, raw2, raw3 (unfiltered)
+
+        # Apply streaming high-pass filter to env values (causal, online filtering)
         env_values_filtered = np.array(
             [self.highpass_filter.filter(env_values_raw[i], i) for i in range(4)]
         )
 
-        # Compute spatial features
+        # Compute spatial features using FILTERED env and UNFILTERED raw
         raw_diffs, env_diffs = self.compute_spatial_features(
             raw_values, env_values_filtered
         )
 
-        # Create feature vector in same order as notebook
+        # Match the notebook feature order: env0, raw0, env1, raw1, env2, raw2, env3, raw3, then diffs
         interleaved_sensors = []
         for i in range(4):
             interleaved_sensors.append(env_values_filtered[i])
             interleaved_sensors.append(raw_values[i])
 
-        features = np.concatenate(
-            [
-                interleaved_sensors,
-                raw_diffs,
-                env_diffs,
-            ]
-        )
+        features = np.concatenate([interleaved_sensors, raw_diffs, env_diffs])
 
-        # Scale features
         features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
 
-        # Add to sliding window
         self.window_buffer.append(features_scaled)
 
     def predict(self):
@@ -226,12 +243,12 @@ class RealtimeInference:
 
         # Get prediction
         with torch.no_grad():
-            prediction = self.model(window_tensor).cpu().numpy()[0]
+            prediction = self.model(window_tensor)
 
-        # Clamp to valid range [0, 1]
-        prediction = np.clip(prediction, 0.0, 1.0)
+        # Clamp predictions to valid range [0, 1] (matching inference_streaming.py)
+        prediction = torch.clamp(prediction, 0.0, 1.0)
 
-        return prediction
+        return prediction.cpu().numpy()[0]
 
     def run_realtime(self, port, baudrate=115200):
         """
@@ -373,11 +390,13 @@ def main():
     model_path = "training/notebooks/best_lstm_model.pth"
     scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
 
-    # Hardware configuration (same as main.py)
+    # Hardware configuration
     if sys.platform == "darwin":
         port = "/dev/tty.usbmodem11301"  # Mac
+    elif sys.platform == "win32":
+        port = "COM3"  # Windows (updated from COM3)
     else:
-        port = "COM3"  # '/dev/ttyAMA0' Raspberry Pi
+        port = "/dev/ttyAMA0"  # Raspberry Pi
 
     baudrate = 115200
 
@@ -396,6 +415,9 @@ def main():
     inference_engine = RealtimeInference(
         model_path=model_path, scaler_path=scaler_path, window_size=30, device=device
     )
+    print(f"✓ Model loaded successfully on {device}")
+    print(f"✓ Model num_layers: {inference_engine.model.num_layers}")
+    print(f"✓ Model hidden_size: {inference_engine.model.hidden_size}")
 
     # Run real-time inference
     inference_engine.run_realtime(port=port, baudrate=baudrate)
