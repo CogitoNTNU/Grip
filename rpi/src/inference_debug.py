@@ -103,7 +103,9 @@ class LSTMModel(torch.nn.Module):
 
 
 class DebugInference:
-    def __init__(self, model_path, scaler_path, window_size=30, device="cpu"):
+    def __init__(
+        self, model_path, scaler_path, window_size=30, device="cpu", smoothing_alpha=0.7
+    ):
         self.window_size = window_size
         self.device = torch.device(device)
 
@@ -171,9 +173,23 @@ class DebugInference:
             "pinky",
         ]
 
+        # FIX: Model outputs predictions in wrong order
+        # Model outputs: [thumb_tip, index, middle, ring, pinky, thumb_base]
+        # Hardware needs: [thumb_tip, thumb_base, index, middle, ring, pinky]
+        # Reorder indices: [0, 5, 1, 2, 3, 4]
+        self.prediction_reorder = [0, 5, 1, 2, 3, 4]
+        print(
+            f"✓ Prediction reordering: model order [0,1,2,3,4,5] → hardware order {self.prediction_reorder}"
+        )
+
+        # Output smoothing (Exponential Moving Average)
+        self.smoothing_alpha = 1.0  # 0.0 = max smoothing, 1.0 = no smoothing
+        self.smoothed_output = None  # Will be initialized on first prediction
+
         print(f"✓ Model loaded on {self.device}")
         print(f"✓ Scaler loaded with {self.scaler.n_features_in_} features")
         print(f"✓ Window size: {window_size}")
+        print(f"✓ Output smoothing alpha: {smoothing_alpha} (lower = smoother)")
 
     def compute_spatial_features(self, raw_values, env_values):
         """Compute spatial features exactly as in inference_streaming.py"""
@@ -241,7 +257,7 @@ class DebugInference:
         return features_scaled
 
     def predict(self):
-        """Make a prediction using the current sliding window buffer."""
+        """Make a prediction using the current sliding window buffer with smoothing."""
         if len(self.window_buffer) < self.window_size:
             return None
 
@@ -257,8 +273,27 @@ class DebugInference:
 
         # Clamp predictions to valid range [0, 1] (matching inference_streaming.py)
         prediction = torch.clamp(prediction, 0.0, 1.0)
+        prediction_raw = prediction.cpu().numpy()[0]
 
-        return prediction.cpu().numpy()[0]
+        # FIX: Reorder predictions to match hardware servo mapping
+        # Model outputs: [thumb_tip, index, middle, ring, pinky, thumb_base]
+        # Reorder to:    [thumb_tip, thumb_base, index, middle, ring, pinky]
+        prediction_raw = prediction_raw[self.prediction_reorder]
+
+        # Apply exponential moving average smoothing for fluid movements
+        if self.smoothed_output is None:
+            # Initialize smoothed output with first prediction
+            self.smoothed_output = prediction_raw.copy()
+        else:
+            # EMA: smoothed = alpha * new + (1 - alpha) * smoothed
+            # Lower alpha = more smoothing (slower response, less jitter)
+            # Higher alpha = less smoothing (faster response, more jitter)
+            self.smoothed_output = (
+                self.smoothing_alpha * prediction_raw
+                + (1 - self.smoothing_alpha) * self.smoothed_output
+            )
+
+        return self.smoothed_output
 
     def load_data(self, data_dir):
         """
@@ -462,6 +497,21 @@ class DebugInference:
                     # Convert to servo values [0, 1023]
                     servo_values = ((1 - prediction) * 1023).astype(int)
                     servo_values = np.clip(servo_values, 0, 1023)
+
+                    if predictions_made == 1:
+                        print("\n" + "=" * 80)
+                        print("PREDICTION REORDERING APPLIED")
+                        print("=" * 80)
+                        print(
+                            "Model output order: [thumb_tip, index, middle, ring, pinky, thumb_base]"
+                        )
+                        print(
+                            "Reordered to:       [thumb_tip, thumb_base, index, middle, ring, pinky]"
+                        )
+                        print("\nServo mapping (after reordering):")
+                        for i, name in enumerate(self.finger_names):
+                            print(f"  Servo {i} ({name:<12}) = {servo_values[i]}")
+                        print("=" * 80 + "\n")
 
                     # *** SEND TO ACTUAL HARDWARE ***
                     msg = ",".join(map(str, servo_values)) + "\n"
@@ -1007,6 +1057,11 @@ def main():
     # Visualization
     show_plot = True  # Enable real-time plotting
 
+    # Output Smoothing (for fluid hand movements)
+    # Lower values = smoother movements (less jitter, slower response)
+    # Higher values = more responsive (faster response, more jitter)
+    # Recommended: 0.2-0.4 for smooth hand movements
+
     # ==============================================================================
 
     # Check if files exist
@@ -1033,7 +1088,11 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     inference_engine = DebugInference(
-        model_path=model_path, scaler_path=scaler_path, window_size=30, device=device
+        model_path=model_path,
+        scaler_path=scaler_path,
+        window_size=30,
+        device=device,
+        smoothing_alpha=1.0,
     )
     print(f"✓ Model loaded successfully on {device}")
     print(f"✓ Model num_layers: {inference_engine.model.num_layers}")

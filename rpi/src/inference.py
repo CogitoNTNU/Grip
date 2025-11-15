@@ -90,7 +90,9 @@ class LSTMModel(nn.Module):
 
 
 class RealtimeInference:
-    def __init__(self, model_path, scaler_path, window_size=30, device="cpu"):
+    def __init__(
+        self, model_path, scaler_path, window_size=30, device="cpu", smoothing_alpha=1.0
+    ):
         self.window_size = window_size
         self.device = torch.device(device)
 
@@ -158,9 +160,23 @@ class RealtimeInference:
             "pinky",
         ]
 
+        # FIX: Model outputs predictions in wrong order
+        # Model outputs: [thumb_tip, index, middle, ring, pinky, thumb_base]
+        # Hardware needs: [thumb_tip, thumb_base, index, middle, ring, pinky]
+        # Reorder indices: [0, 5, 1, 2, 3, 4]
+        self.prediction_reorder = [0, 5, 1, 2, 3, 4]
+        print(
+            f"✓ Prediction reordering: model order [0,1,2,3,4,5] → hardware order {self.prediction_reorder}"
+        )
+
+        # Output smoothing (Exponential Moving Average)
+        self.smoothing_alpha = 1.0  # 0.0 = max smoothing, 1.0 = no smoothing
+        self.smoothed_output = None  # Will be initialized on first prediction
+
         print(f"✓ Model loaded on {self.device}")
         print(f"✓ Scaler loaded with {self.scaler.n_features_in_} features")
         print(f"✓ Window size: {window_size}")
+        print(f"✓ Output smoothing alpha: {smoothing_alpha} (lower = smoother)")
 
     def compute_spatial_features(self, raw_values, env_values):
         """Compute spatial features exactly as in inference_streaming.py"""
@@ -227,10 +243,10 @@ class RealtimeInference:
 
     def predict(self):
         """
-        Make a prediction using the current sliding window buffer.
+        Make a prediction using the current sliding window buffer with smoothing.
 
         Returns:
-            Predicted finger positions (6 values) or None if buffer not full
+            Smoothed predicted finger positions (6 values) or None if buffer not full
         """
         if len(self.window_buffer) < self.window_size:
             return None
@@ -242,13 +258,30 @@ class RealtimeInference:
         )
 
         # Get prediction
-        with torch.no_grad():
+        with torch.no_grad:
             prediction = self.model(window_tensor)
 
         # Clamp predictions to valid range [0, 1] (matching inference_streaming.py)
         prediction = torch.clamp(prediction, 0.0, 1.0)
+        prediction_raw = prediction.cpu().numpy()[0]
 
-        return prediction.cpu().numpy()[0]
+        # FIX: Reorder predictions to match hardware servo mapping
+        # Model outputs: [thumb_tip, index, middle, ring, pinky, thumb_base]
+        # Reorder to:    [thumb_tip, thumb_base, index, middle, ring, pinky]
+        prediction_raw = prediction_raw[self.prediction_reorder]
+
+        # Apply exponential moving average smoothing for fluid movements
+        if self.smoothed_output is None:
+            # Initialize smoothed output with first prediction
+            self.smoothed_output = prediction_raw.copy()
+        else:
+            # EMA: smoothed = alpha * new + (1 - alpha) * smoothed
+            self.smoothed_output = (
+                self.smoothing_alpha * prediction_raw
+                + (1 - self.smoothing_alpha) * self.smoothed_output
+            )
+
+        return self.smoothed_output
 
     def run_realtime(self, port, baudrate=115200):
         """
@@ -394,11 +427,16 @@ def main():
     if sys.platform == "darwin":
         port = "/dev/tty.usbmodem11301"  # Mac
     elif sys.platform == "win32":
-        port = "COM3"  # Windows (updated from COM3)
+        port = "COM3"  # Windows
     else:
         port = "/dev/ttyAMA0"  # Raspberry Pi
 
     baudrate = 115200
+
+    # Output Smoothing (for fluid hand movements)
+    # Lower values = smoother movements (less jitter, slower response)
+    # Higher values = more responsive (faster response, more jitter)
+    # Recommended: 0.2-0.4 for smooth hand movements
 
     # Check if files exist
     if not os.path.exists(model_path):
