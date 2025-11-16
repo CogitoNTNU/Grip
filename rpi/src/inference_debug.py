@@ -397,7 +397,7 @@ class DebugInference:
         print("\n" + "=" * 80)
         print("CSV REPLAY + HARDWARE CONTROL MODE")
         print("=" * 80)
-        print("Data source: martin3/raw")
+        print("Data source: martin6/test")
         print(f"Hardware port: {port}")
         print(f"Starting at sample: {start_idx}")
         print(f"Processing {num_samples} samples")
@@ -498,7 +498,7 @@ class DebugInference:
                     predictions_made += 1
 
                     # Convert to servo values [0, 1023]
-                    servo_values = ((1 - prediction) * 1023).astype(int)
+                    servo_values = ((prediction) * 1023).astype(int)
                     servo_values = np.clip(servo_values, 0, 1023)
 
                     if predictions_made == 1:
@@ -1028,8 +1028,10 @@ class DebugInference:
 
 def main():
     # Configuration (matching inference_streaming.py)
-    model_path = "training/notebooks/best_lstm_model.pth"
-    scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    # model_path = "training/notebooks/best_lstm_model.pth"
+    # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    model_path = "data/martin6/best_lstm_model.pth"
+    scaler_path = "data/martin6/scaler_inputs_lstm.pkl"
 
     # ==============================================================================
     # MODE SELECTION: Choose what you want to debug

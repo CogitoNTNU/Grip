@@ -446,8 +446,10 @@ class RealtimeInference:
 
 def main():
     # Configuration
-    model_path = "training/notebooks/best_lstm_model.pth"
-    scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    # model_path = "training/notebooks/best_lstm_model.pth"
+    # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    model_path = "data/martin6/best_lstm_model.pth"
+    scaler_path = "data/martin6/scaler_inputs_lstm.pkl"
 
     # Hardware configuration
     if sys.platform == "darwin":
