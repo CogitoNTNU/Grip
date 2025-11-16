@@ -156,8 +156,11 @@ class DebugInference:
         # Initialize sliding window buffer
         self.window_buffer = deque(maxlen=window_size)
 
-        # Initialize streaming high-pass filter for env channels (matching inference_streaming.py)
-        fs = 1.0 / 0.03446  # Same as inference_streaming.py
+        # Initialize streaming high-pass filter for env channels
+        # ⚠️ CRITICAL: This MUST match the actual training data sample rate!
+        # Run the training notebook's sampling rate analysis cell to get the measured value
+        fs = 30.0  # Hz - Updated to match Arduino (33ms delay) and data collection (30 Hz target)
+        print(f"✓ Using sampling rate: {fs} Hz for high-pass filter")
         self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
 
         # Define neighbor relationships for spatial features (matching notebook)

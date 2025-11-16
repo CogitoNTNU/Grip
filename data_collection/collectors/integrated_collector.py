@@ -94,7 +94,7 @@ def draw_hand_ui(detector, frame, hand_label):
 def collect_integrated_data(
     port: str = "MOCK",
     num_iterations: int = 1000,
-    sleep_time: float = 0.05,
+    sleep_time: float = 0.033,  # ~30Hz to match camera framerate
     batch_size: int = 100,
     username: str = "default",
 ) -> None:
@@ -146,12 +146,24 @@ def collect_integrated_data(
     batch_buffer = []
     should_exit = False
 
+    # Timing control for consistent sampling
+    target_sample_rate = 30.0  # Hz (matches typical webcam framerate)
+    sample_interval = 1.0 / target_sample_rate
+    last_sample_time = time.time()
+
+    print(
+        f"\n🎯 Target sampling rate: {target_sample_rate} Hz ({sample_interval * 1000:.1f}ms interval)"
+    )
+    print("=" * 60)
+
     try:
         with open(csv_file, "w", newline="") as f:
             writer = csv.writer(f)
             write_csv_header(writer)
 
             while sample_count < num_iterations and not should_exit:
+                current_time = time.time()
+
                 success, frame = cap.read()
 
                 if not success:
@@ -162,7 +174,8 @@ def collect_integrated_data(
                 frame = detector.findHands(frame)
                 key = cv2.waitKey(1) & 0xFF
 
-                # Read ALL sensor data from queue and push to monitor
+                # ALWAYS drain queue to keep data fresh (prevent old data accumulation)
+                # But only use the LATEST reading
                 try:
                     queue_count = 0
                     while not subscription.queue.empty():
@@ -170,11 +183,7 @@ def collect_integrated_data(
                         latest_sensor_values = parse_port_event(payload)
                         queue_count += 1
 
-                        # Debug: print first few values
-                        if queue_count == 1 and sample_count < 5:
-                            print(f"First sensor data: {latest_sensor_values}")
-
-                        # Push each reading to web monitor immediately
+                        # Push to web monitor for visualization
                         if web_monitor and len(latest_sensor_values) == 8:
                             web_monitor.push_data(latest_sensor_values)
                         elif web_monitor:
@@ -182,25 +191,27 @@ def collect_integrated_data(
                                 f"Warning: Got {len(latest_sensor_values)} values (expected 8)"
                             )
 
-                    # Debug: print queue activity regularly
-                    if queue_count > 0 and sample_count % 10 == 0:
-                        print(
-                            f"Queue: {queue_count} items processed | Sample: {sample_count} | Values: {latest_sensor_values[:4]}..."
-                        )
-
                 except Exception as e:
                     print(f"Error parsing sensor data: {e}")
                     import traceback
 
                     traceback.print_exc()
 
+                # Get hand data for current frame
                 hand_label, finger_values = get_hand_data(detector, frame)
                 draw_hand_ui(detector, frame, hand_label)
                 draw_sensor_data_panel(frame, latest_sensor_values[:8])
                 draw_collection_status_bar(
                     frame, is_collecting, sample_count, num_iterations
                 )
-                if is_collecting:
+
+                # RATE-LIMITED COLLECTION: Only save samples at target rate
+                time_since_last_sample = current_time - last_sample_time
+
+                if is_collecting and time_since_last_sample >= sample_interval:
+                    # Record sample with timestamp
+                    last_sample_time = current_time
+
                     row = (
                         [datetime.now().isoformat(), sample_count]
                         + latest_sensor_values[:8]
@@ -209,12 +220,13 @@ def collect_integrated_data(
                     )
                     batch_buffer.append(row)
                     sample_count += 1
+
                     if len(batch_buffer) >= batch_size:
                         writer.writerows(batch_buffer)
                         f.flush()
                         batch_buffer.clear()
                         print(
-                            f"\nBatch written: {sample_count}/{num_iterations} samples"
+                            f"\nBatch written: {sample_count}/{num_iterations} samples | Rate: {1.0 / time_since_last_sample:.1f} Hz"
                         )
                     if sample_count >= num_iterations:
                         if batch_buffer:
@@ -225,6 +237,7 @@ def collect_integrated_data(
                             f"\nCollection complete! {sample_count} samples collected."
                         )
                         break
+
                 cv2.imshow("Integrated Data Collection", frame)
 
                 if key == ord(" "):
@@ -306,7 +319,7 @@ if __name__ == "__main__":
     collect_integrated_data(
         port=port,
         num_iterations=100000,
-        sleep_time=0.05,
+        sleep_time=0.033,  # Not used anymore, keeping for API compatibility
         batch_size=100,
         username=username,
     )
