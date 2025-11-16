@@ -1,5 +1,22 @@
 # Sampling Rate Synchronization Fix - Complete Summary
 
+## 🎯 Which Arduino Script Should You Use?
+
+**For Data Collection:**
+
+- Use `arduino/sensor_reader/sensor_reader.ino` - This is the main sketch for collecting training data
+- Output format: `S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env`
+
+**For Inference (Real-time Control):**
+
+- Use `arduino/sensor_servo_controller/sensor_servo_controller.ino` - Reads sensors AND controls servos
+- Output format: `S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env`
+- Input format: `servo0,servo1,servo2,servo3,servo4,servo5` (comma-separated servo values)
+
+**All Arduino scripts have been updated to 30Hz sampling (33ms delay)!**
+
+______________________________________________________________________
+
 ## 🔍 Problem Identified
 
 You noticed that **inference on recorded data performs excellently** (R² ≈ 0.80+), but **real-time inference has poor accuracy**. After comprehensive analysis, I identified a critical **multi-rate system synchronization failure**:
@@ -415,7 +432,10 @@ ______________________________________________________________________
 
 ### Hardware
 
-- ✅ `arduino/sensor_servo_controller/sensor_servo_controller.ino`
+- ✅ `arduino/sensor_servo_controller/sensor_servo_controller.ino` **(Used for inference with servo control)**
+- ✅ `arduino/sensor_reader/sensor_reader.ino` **(Main data collection sketch - recommended)**
+- ✅ `arduino/sensor_pwm/sensor_8ch.ino` **(Alternative 8-channel sketch)**
+- ✅ `arduino/README.md` **(Documentation updated to reflect 30Hz)**
 
 ### Data Collection
 

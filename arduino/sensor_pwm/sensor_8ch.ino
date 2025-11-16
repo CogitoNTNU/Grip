@@ -10,7 +10,7 @@
 const int NUM_SENSORS = 4;  // 4 sensor pairs
 const int SENSOR_PINS[NUM_SENSORS] = {A0, A1, A2, A3};
 const int BAUD_RATE = 115200;  // Fast baud rate for high sampling
-const int SAMPLE_DELAY = 10;   // 10ms = ~100Hz sampling
+const int SAMPLE_DELAY = 33;   // 33ms = ~30Hz sampling (matches data collection and inference)
 
 void setup() {
   Serial.begin(BAUD_RATE);
@@ -23,7 +23,7 @@ void setup() {
   // Print startup message (for debugging in Arduino IDE)
   Serial.println("# Grip Sensor System - 8 Channel");
   Serial.println("# Format: env0,raw0,env1,raw1,env2,raw2,env3,raw3");
-  Serial.println("# Sampling at ~100Hz");
+  Serial.println("# Sampling at ~30Hz");
   delay(1000);
 }
 
