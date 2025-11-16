@@ -262,7 +262,7 @@ class RealtimeInference:
         )
 
         # Get prediction
-        with torch.no_grad:
+        with torch.no_grad():
             prediction = self.model(window_tensor)
 
         # Clamp predictions to valid range [0, 1] (matching inference_streaming.py)
@@ -419,13 +419,18 @@ class RealtimeInference:
                             print(
                                 f"Receive rate: {sample_fps:.1f} Hz | Process rate: {process_fps:.1f} Hz (target: {target_sample_rate:.1f} Hz) | Pred rate: {pred_fps:.1f} Hz"
                             )
-                            print("Predictions:")
-                            for i, name in enumerate(self.finger_names):
-                                bar = "█" * int(prediction[i] * 20)
-                                servo_val = servo_values[i]
-                                print(
-                                    f"  {name:<12}: {prediction[i]:.3f} {bar} (servo: {servo_val})"
-                                )
+
+                            # Only display predictions if we have valid predictions
+                            if prediction is not None:
+                                print("Predictions:")
+                                for i, name in enumerate(self.finger_names):
+                                    bar = "█" * int(prediction[i] * 20)
+                                    servo_val = servo_values[i]
+                                    print(
+                                        f"  {name:<12}: {prediction[i]:.3f} {bar} (servo: {servo_val})"
+                                    )
+                            else:
+                                print("Predictions: Waiting for buffer to fill...")
 
                             last_display_time = current_time
 
@@ -446,9 +451,9 @@ class RealtimeInference:
 
 def main():
     # Configuration
-    # model_path = "training/notebooks/best_lstm_model.pth"
+    model_path = "training/notebooks/best_lstm_model.pth"
     # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
-    model_path = "data/martin6/best_lstm_model.pth"
+    # model_path = "data/martin6/best_lstm_model.pth"
     scaler_path = "data/martin6/scaler_inputs_lstm.pkl"
 
     # Hardware configuration

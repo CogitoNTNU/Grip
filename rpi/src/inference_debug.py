@@ -1040,10 +1040,11 @@ def main():
     # "hardware"     - Control actual hand with live Arduino data (no CSV)
     # "csv+hardware" - Replay CSV data AND send predictions to actual hand (BEST FOR DEBUGGING!)
     # ==============================================================================
-    MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
+    # MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
+    MODE = "hardware"
 
     # CSV Simulation Settings (for "csv" and "csv+hardware" modes)
-    data_dir = "data/martin3/raw"
+    data_dir = "data/martin6/test"
     start_idx = 1000  # Skip initial samples for stability
     num_samples = 1000  # Number of samples to process
     playback_speed = (
