@@ -277,6 +277,7 @@ class StreamingInference:
         filter_type="none",
         filter_config=None,
         use_scaling=True,
+        feature_window=10,
     ):
         """
         Initialize streaming inference with optional online scaling and configurable filtering.
@@ -301,35 +302,40 @@ class StreamingInference:
                           For 'none': {} (no parameters needed)
             use_scaling: If True, apply scaling to features. If False, use raw features.
                         Should match the USE_SCALING setting from training.
+            feature_window: Window size for computing EMG features (RMS, MAV, ZC, WL)
         """
         self.window_size = window_size
         self.device = torch.device(device)
         self.use_online_scaling = use_online_scaling
         self.use_scaling = use_scaling
+        self.feature_window = feature_window
+
+        # Load model checkpoint first to get number of features
+        checkpoint = torch.load(
+            model_path, map_location=self.device, weights_only=False
+        )
+
+        # Determine number of input features from checkpoint
+        # PRIORITY: Use actual model weights (most reliable) over hyperparameters
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            first_layer_weight = checkpoint["model_state_dict"][
+                "lstm_layers.0.weight_ih_l0"
+            ]
+            n_inputs = first_layer_weight.shape[
+                1
+            ]  # input dimension from actual weights
+            print(f"Loaded n_features from model weights: {n_inputs}")
+        elif isinstance(checkpoint, dict) and "hyperparameters" in checkpoint:
+            n_inputs = checkpoint["hyperparameters"].get("n_features", 16)
+            print(f"Loaded n_features from hyperparameters: {n_inputs}")
+        else:
+            n_inputs = 16  # Default fallback
+            print(f"Using default n_features: {n_inputs}")
+
+        n_outputs = 6
 
         # Load pretrained scaler
         pretrained_scaler = joblib.load(scaler_path)
-
-        sensor_columns = [
-            "env0",
-            "raw0",
-            "env1",
-            "raw1",
-            "env2",
-            "raw2",
-            "env3",
-            "raw3",
-            "raw_diff1",
-            "raw_diff2",
-            "raw_diff3",
-            "raw_diff4",
-            "env_diff1",
-            "env_diff2",
-            "env_diff3",
-            "env_diff4",
-        ]
-        n_inputs = len(sensor_columns)
-        n_outputs = 6
 
         # Initialize scaler (online or fixed) - only if scaling is enabled
         if use_scaling:
@@ -372,9 +378,6 @@ class StreamingInference:
             dropout=0.2,
         ).to(self.device)
 
-        checkpoint = torch.load(
-            model_path, map_location=self.device, weights_only=False
-        )
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
             self.model.load_state_dict(checkpoint["model_state_dict"])
         else:
@@ -383,6 +386,24 @@ class StreamingInference:
         self.model.eval()
 
         self.window_buffer = deque(maxlen=window_size)
+
+        # Store model dimensions for feature processing
+        self.n_inputs = n_inputs
+        self.use_emg_features = n_inputs == 32  # 32 features = with EMG, 16 = without
+
+        if self.use_emg_features:
+            print(f"\n{'=' * 70}")
+            print("EMG FEATURES ENABLED")
+            print(f"{'=' * 70}")
+            print(f"  Model expects {n_inputs} features (base + spatial + EMG)")
+            print("  EMG features: RMS, MAV, ZC, WL per channel")
+            print(f"{'=' * 70}\n")
+        else:
+            print(f"\n{'=' * 70}")
+            print("EMG FEATURES DISABLED")
+            print(f"{'=' * 70}")
+            print(f"  Model expects {n_inputs} features (base + spatial only)")
+            print(f"{'=' * 70}\n")
 
         # ⚠️ CRITICAL: This MUST match the training data sample rate!
         # The training notebook measured: MEASURED_SAMPLE_RATE = 4.2144 Hz
@@ -418,6 +439,18 @@ class StreamingInference:
         # Convert to 0-indexed for array access in inference
         self.neighbors = {1: [2], 2: [1, 4], 3: [4], 4: [2, 3]}
 
+        # Buffers for EMG feature computation (per channel) - only if using EMG features
+        # We need to keep a history of raw samples to compute features
+        if self.use_emg_features:
+            self.raw_buffers = {
+                "raw0": deque(maxlen=feature_window),
+                "raw1": deque(maxlen=feature_window),
+                "raw2": deque(maxlen=feature_window),
+                "raw3": deque(maxlen=feature_window),
+            }
+        else:
+            self.raw_buffers = None
+
     def compute_spatial_features(self, raw_values, env_values):
         raw_diffs = []
         env_diffs = []
@@ -439,6 +472,37 @@ class StreamingInference:
                 env_diffs.append(sum(env_diff_list) / len(env_diff_list))
 
         return raw_diffs, env_diffs
+
+    def compute_emg_features(self, signal_buffer):
+        """
+        Compute EMG features from a buffered signal (streaming mode).
+
+        Args:
+            signal_buffer: deque of recent samples (length <= feature_window)
+
+        Returns:
+            Dictionary with keys: 'rms', 'mav', 'zc', 'wl'
+        """
+        if len(signal_buffer) < 2:
+            # Not enough samples yet
+            return {"rms": 0.0, "mav": 0.0, "zc": 0.0, "wl": 0.0}
+
+        # Convert deque to array
+        signal = np.array(signal_buffer)
+
+        # RMS (Root Mean Square) - signal power
+        rms = np.sqrt(np.mean(signal**2))
+
+        # MAV (Mean Absolute Value) - signal amplitude
+        mav = np.mean(np.abs(signal))
+
+        # ZC (Zero Crossings) - frequency content indicator
+        zc = np.sum(np.diff(np.sign(signal)) != 0)
+
+        # WL (Waveform Length) - signal complexity
+        wl = np.sum(np.abs(np.diff(signal)))
+
+        return {"rms": rms, "mav": mav, "zc": float(zc), "wl": wl}
 
     def process_sample(self, raw_sample):
         """
@@ -464,13 +528,39 @@ class StreamingInference:
             raw_values, env_values_filtered
         )
 
-        # Match the notebook feature order: env0, raw0, env1, raw1, env2, raw2, env3, raw3, then diffs
+        # Match the notebook feature order:
+        # env0, raw0, env1, raw1, env2, raw2, env3, raw3, spatial_diffs, [emg_features if enabled]
         interleaved_sensors = []
         for i in range(4):
             interleaved_sensors.append(env_values_filtered[i])
             interleaved_sensors.append(raw_values[i])
 
-        features = np.concatenate([interleaved_sensors, raw_diffs, env_diffs])
+        # Conditionally compute EMG features if model expects them
+        if self.use_emg_features:
+            # Update raw buffers for EMG feature computation
+            for i, ch in enumerate(["raw0", "raw1", "raw2", "raw3"]):
+                self.raw_buffers[ch].append(raw_values[i])
+
+            # Compute EMG features for each raw channel
+            emg_features = []
+            for ch in ["raw0", "raw1", "raw2", "raw3"]:
+                feat_dict = self.compute_emg_features(self.raw_buffers[ch])
+                # Add in order: rms, mav, zc, wl
+                emg_features.extend(
+                    [
+                        feat_dict["rms"],
+                        feat_dict["mav"],
+                        feat_dict["zc"],
+                        feat_dict["wl"],
+                    ]
+                )
+
+            features = np.concatenate(
+                [interleaved_sensors, raw_diffs, env_diffs, emg_features]
+            )
+        else:
+            # No EMG features - just base sensors + spatial features
+            features = np.concatenate([interleaved_sensors, raw_diffs, env_diffs])
 
         # Scale features if scaling is enabled
         if self.use_scaling:
@@ -796,29 +886,36 @@ def main():
         FILTER_TYPE = hyperparams.get("filter_type", "none")
         FILTER_CONFIG = hyperparams.get("filter_config", {"cutoff": 0.5, "order": 4})
         fs = hyperparams.get("sampling_rate", 4.2144)
-        USE_SCALING = hyperparams.get("use_scaling", False)  # NEW: Load scaling config
+        USE_SCALING = hyperparams.get("use_scaling", False)
+        FEATURE_WINDOW = hyperparams.get(
+            "feature_window", 10
+        )  # NEW: Load EMG feature window
 
-        print("\n✅ Loaded configuration from model checkpoint:")
+        print("\nLoaded configuration from model checkpoint:")
         print(f"   Filter type: {FILTER_TYPE}")
         print(f"   Filter config: {FILTER_CONFIG}")
         print(f"   Sampling rate: {fs:.4f} Hz")
         print(f"   Scaling: {'ENABLED' if USE_SCALING else 'DISABLED'}")
+        print(f"   Feature window: {FEATURE_WINDOW} samples")
     else:
         # Fallback to defaults if checkpoint doesn't have filter config
-        print("\n⚠️  No configuration found in checkpoint, using defaults:")
+        print("\nNo configuration found in checkpoint, using defaults:")
         FILTER_TYPE = "highpass"
         FILTER_CONFIG = {"cutoff": 0.5, "order": 4}
         fs = 4.2144
         USE_SCALING = True
+        FEATURE_WINDOW = 10
         print(f"   Filter type: {FILTER_TYPE}")
         print(f"   Filter config: {FILTER_CONFIG}")
         print(f"   Sampling rate: {fs:.4f} Hz")
         print(f"   Scaling: {'ENABLED' if USE_SCALING else 'DISABLED'}")
+        print(f"   Feature window: {FEATURE_WINDOW} samples")
 
     # You can override the filter configuration here if needed:
     # FILTER_TYPE = 'none'
     # FILTER_CONFIG = {}
     # USE_SCALING = False
+    # FEATURE_WINDOW = 10
 
     print("\nInitializing streaming inference engine...")
 
@@ -838,7 +935,8 @@ def main():
         online_warmup_samples=100,  # Only used if use_online_scaling=True
         filter_type=FILTER_TYPE,  # ✅ Loaded from checkpoint
         filter_config=FILTER_CONFIG,  # ✅ Loaded from checkpoint
-        use_scaling=USE_SCALING,  # ✅ NEW: Loaded from checkpoint
+        use_scaling=USE_SCALING,  # ✅ Loaded from checkpoint
+        feature_window=FEATURE_WINDOW,  # ✅ NEW: Loaded from checkpoint
     )
 
     print(f"✓ Model loaded successfully on {device}")
