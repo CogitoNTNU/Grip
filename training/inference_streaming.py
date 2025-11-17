@@ -25,8 +25,12 @@ import pandas as pd
 import joblib
 import os
 import glob
-from scipy.signal import butter, lfilter
 from collections import deque
+import sys
+
+# Add parent directory to path to import filter_strategies
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from training.filter_strategies import create_filter, FilterStrategy
 
 
 class StreamingStandardScaler:
@@ -211,23 +215,6 @@ class StreamingStandardScaler:
         }
 
 
-class StreamingHighPassFilter:
-    def __init__(self, fs, cutoff=0.5, order=4):
-        self.fs = fs
-        self.cutoff = cutoff
-        self.order = order
-        nyq = 0.5 * fs
-        normal_cutoff = cutoff / nyq
-        self.b, self.a = butter(order, normal_cutoff, btype="high", analog=False)
-        self.zi = {i: np.zeros(max(len(self.a), len(self.b)) - 1) for i in range(4)}
-
-    def filter(self, value, channel):
-        filtered_value, self.zi[channel] = lfilter(
-            self.b, self.a, [value], zi=self.zi[channel]
-        )
-        return filtered_value[0]
-
-
 class LSTMModel(nn.Module):
     def __init__(self, n_inputs, n_outputs, hidden_size=128, num_layers=2, dropout=0.2):
         super().__init__()
@@ -282,14 +269,17 @@ class StreamingInference:
         self,
         model_path,
         scaler_path,
-        window_size=30,
+        window_size=50,
         device="cpu",
         use_online_scaling=True,
         online_adaptation_rate=0.1,
         online_warmup_samples=100,
+        filter_type="none",
+        filter_config=None,
+        use_scaling=True,
     ):
         """
-        Initialize streaming inference with optional online scaling.
+        Initialize streaming inference with optional online scaling and configurable filtering.
 
         Args:
             model_path: Path to trained LSTM model
@@ -298,13 +288,24 @@ class StreamingInference:
             device: 'cpu' or 'cuda'
             use_online_scaling: If True, use adaptive online scaler that learns from incoming data
                                If False, use fixed pretrained scaler
+                               NOTE: This is only used if use_scaling=True
             online_adaptation_rate: How fast online scaler adapts (0.001-0.1)
                                    Lower = more stable, Higher = more responsive
             online_warmup_samples: Number of samples to collect before online scaling starts
+            filter_type: Type of filter to use: 'none', 'highpass', 'lowpass', 'bandpass', 'moving_average'
+            filter_config: Dictionary of filter parameters (depends on filter_type)
+                          For 'highpass': {'cutoff': 0.5, 'order': 4}
+                          For 'lowpass': {'cutoff': 5.0, 'order': 4}
+                          For 'bandpass': {'low_cutoff': 0.5, 'high_cutoff': 5.0, 'order': 4}
+                          For 'moving_average': {'window_size': 5}
+                          For 'none': {} (no parameters needed)
+            use_scaling: If True, apply scaling to features. If False, use raw features.
+                        Should match the USE_SCALING setting from training.
         """
         self.window_size = window_size
         self.device = torch.device(device)
         self.use_online_scaling = use_online_scaling
+        self.use_scaling = use_scaling
 
         # Load pretrained scaler
         pretrained_scaler = joblib.load(scaler_path)
@@ -330,29 +331,38 @@ class StreamingInference:
         n_inputs = len(sensor_columns)
         n_outputs = 6
 
-        # Initialize scaler (online or fixed)
-        if use_online_scaling:
-            print(f"\n{'=' * 70}")
-            print("ONLINE ADAPTIVE SCALING ENABLED")
-            print(f"{'=' * 70}")
-            self.scaler = StreamingStandardScaler(
-                n_features=n_inputs,
-                warmup_samples=online_warmup_samples,
-                adaptation_rate=online_adaptation_rate,
-                use_pretrained=True,  # Start with pretrained stats
-            )
-            self.scaler.initialize_from_pretrained(pretrained_scaler)
-            print(f"  Warmup samples: {online_warmup_samples}")
-            print(f"  Adaptation rate: {online_adaptation_rate}")
-            print("  → Scaler will adapt to distribution shifts in real-time")
-            print(f"{'=' * 70}\n")
+        # Initialize scaler (online or fixed) - only if scaling is enabled
+        if use_scaling:
+            if use_online_scaling:
+                print(f"\n{'=' * 70}")
+                print("ONLINE ADAPTIVE SCALING ENABLED")
+                print(f"{'=' * 70}")
+                self.scaler = StreamingStandardScaler(
+                    n_features=n_inputs,
+                    warmup_samples=online_warmup_samples,
+                    adaptation_rate=online_adaptation_rate,
+                    use_pretrained=True,  # Start with pretrained stats
+                )
+                self.scaler.initialize_from_pretrained(pretrained_scaler)
+                print(f"  Warmup samples: {online_warmup_samples}")
+                print(f"  Adaptation rate: {online_adaptation_rate}")
+                print("  → Scaler will adapt to distribution shifts in real-time")
+                print(f"{'=' * 70}\n")
+            else:
+                print(f"\n{'=' * 70}")
+                print("FIXED PRETRAINED SCALING")
+                print(f"{'=' * 70}")
+                self.scaler = pretrained_scaler
+                print("  Using fixed pretrained scaler (no adaptation)")
+                print(f"{'=' * 70}\n")
         else:
             print(f"\n{'=' * 70}")
-            print("FIXED PRETRAINED SCALING")
+            print("SCALING DISABLED")
             print(f"{'=' * 70}")
-            self.scaler = pretrained_scaler
-            print("  Using fixed pretrained scaler (no adaptation)")
+            print("  Using raw feature values (no scaling)")
+            print("  Model was trained without scaling")
             print(f"{'=' * 70}\n")
+            self.scaler = None
 
         self.model = LSTMModel(
             n_inputs=n_inputs,
@@ -374,13 +384,34 @@ class StreamingInference:
 
         self.window_buffer = deque(maxlen=window_size)
 
-        # Initialize streaming high-pass filter for env channels
         # ⚠️ CRITICAL: This MUST match the training data sample rate!
         # The training notebook measured: MEASURED_SAMPLE_RATE = 4.2144 Hz
-        # NOT the Arduino rate (30 Hz) - the actual rate in the data files is ~4.21 Hz
         fs = 4.2144  # Hz - MEASURED from training data timestamps
-        print(f"Using sampling rate: {fs} Hz for high-pass filter (matches training)")
-        self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
+
+        # Initialize filter using strategy pattern
+        if filter_config is None:
+            filter_config = {}
+
+        # Set default configs for different filter types
+        default_configs = {
+            "none": {},
+            "highpass": {"cutoff": 0.5, "order": 4},
+            "lowpass": {"cutoff": 2.0, "order": 4},
+            "bandpass": {"low_cutoff": 0.5, "high_cutoff": 2.0, "order": 4},
+            "moving_average": {"window_size": 5},
+        }
+
+        # Merge default config with user config
+        final_config = default_configs.get(filter_type, {}).copy()
+        final_config.update(filter_config)
+
+        self.filter = create_filter(filter_type, fs, **final_config)
+
+        print(f"\n{'=' * 70}")
+        print("FILTER CONFIGURATION")
+        print(f"{'=' * 70}")
+        print(f"  {self.filter.get_description()}")
+        print(f"{'=' * 70}\n")
 
         # Define neighbor relationships for spatial features (MUST match notebook exactly!)
         # Training notebook uses 1-indexed: {1: [], 2: [3], 3: [2, 4], 4: [3]}
@@ -441,13 +472,17 @@ class StreamingInference:
 
         features = np.concatenate([interleaved_sensors, raw_diffs, env_diffs])
 
-        # Scale features using online scaler (adapts) or fixed scaler (no adaptation)
-        if self.use_online_scaling:
-            # Online scaler automatically updates statistics during transform
-            features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
+        # Scale features if scaling is enabled
+        if self.use_scaling:
+            if self.use_online_scaling:
+                # Online scaler automatically updates statistics during transform
+                features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
+            else:
+                # Fixed pretrained scaler (traditional approach)
+                features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
         else:
-            # Fixed pretrained scaler (traditional approach)
-            features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
+            # No scaling - use raw features
+            features_scaled = features
 
         self.window_buffer.append(features_scaled)
 
@@ -458,7 +493,15 @@ class StreamingInference:
         Get current scaler statistics for monitoring/debugging.
         Useful for tracking how the online scaler adapts over time.
         """
-        if self.use_online_scaling:
+        if not self.use_scaling:
+            return {
+                "mean": None,
+                "std": None,
+                "var": None,
+                "n_samples": "N/A (scaling disabled)",
+                "is_warmed_up": None,
+            }
+        elif self.use_online_scaling:
             return self.scaler.get_stats()
         else:
             return {
@@ -487,18 +530,18 @@ class StreamingInference:
         return prediction.cpu().numpy()[0]
 
 
-def load_test_data():
+def load_test_data(filter_strategy: FilterStrategy = None):
     """
-    Load test data and apply BATCH filtering to match training preprocessing.
+    Load test data and optionally apply batch filtering to match training preprocessing.
 
-    CRITICAL: The training notebook applies lfilter() to the ENTIRE signal at once,
-    which gives different filter transient behavior than sample-by-sample filtering.
-    To match training exactly, we must apply the same batch filtering here.
+    Args:
+        filter_strategy: FilterStrategy instance to apply to env channels.
+                        If None, no filtering is applied.
 
     Returns:
-        DataFrame with batch-filtered env channels (matches training preprocessing)
+        DataFrame with optionally filtered env channels
     """
-    dirs = ["data/tobias/raw"]
+    dirs = ["data/tobias/test"]
     # dirs = ["data/afras/raw"]
 
     csv_files = []
@@ -535,21 +578,24 @@ def load_test_data():
 
     df_clean = df.dropna(subset=numeric_columns)
 
-    # ⚠️ APPLY BATCH FILTERING TO MATCH TRAINING!
-    # Training applies: df_clean[col] = lfilter(b, a, df_clean[col].values)
-    # This is different from streaming sample-by-sample filtering
-    print("\nApplying batch high-pass filter to env channels (matching training)...")
-    from scipy.signal import butter, lfilter
+    # Apply filtering if strategy provided
+    if filter_strategy is not None:
+        print(f"\n{'=' * 70}")
+        print("APPLYING BATCH FILTERING TO ENV CHANNELS")
+        print(f"{'=' * 70}")
+        print(f"  {filter_strategy.get_description()}")
+        print(f"{'=' * 70}\n")
 
-    fs = 4.2144  # MEASURED sample rate from training
-    cutoff = 0.5
-    order = 4
-    b, a = butter(order, cutoff / (0.5 * fs), btype="high")
+        for col in ["env0", "env1", "env2", "env3"]:
+            df_clean[col] = filter_strategy.apply_batch(df_clean[col].values)
 
-    for col in ["env0", "env1", "env2", "env3"]:
-        df_clean[col] = lfilter(b, a, df_clean[col].values)
-
-    print("Batch filtering complete - data now matches training preprocessing")
+        print("✅ Batch filtering complete - data matches training preprocessing")
+    else:
+        print(f"\n{'=' * 70}")
+        print("NO FILTERING APPLIED")
+        print(f"{'=' * 70}")
+        print("  Using raw unfiltered data")
+        print(f"{'=' * 70}\n")
 
     return df_clean
 
@@ -739,20 +785,60 @@ def main():
     print("\n" + "=" * 70)
     print("STREAMING INFERENCE")
     print("=" * 70)
-    print("\nInitializing streaming inference engine...")
+
+    # Load model checkpoint to extract filter configuration
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+
+    # Extract filter configuration from checkpoint (if available)
+    if isinstance(checkpoint, dict) and "hyperparameters" in checkpoint:
+        hyperparams = checkpoint["hyperparameters"]
+        FILTER_TYPE = hyperparams.get("filter_type", "none")
+        FILTER_CONFIG = hyperparams.get("filter_config", {"cutoff": 0.5, "order": 4})
+        fs = hyperparams.get("sampling_rate", 4.2144)
+        USE_SCALING = hyperparams.get("use_scaling", False)  # NEW: Load scaling config
+
+        print("\n✅ Loaded configuration from model checkpoint:")
+        print(f"   Filter type: {FILTER_TYPE}")
+        print(f"   Filter config: {FILTER_CONFIG}")
+        print(f"   Sampling rate: {fs:.4f} Hz")
+        print(f"   Scaling: {'ENABLED' if USE_SCALING else 'DISABLED'}")
+    else:
+        # Fallback to defaults if checkpoint doesn't have filter config
+        print("\n⚠️  No configuration found in checkpoint, using defaults:")
+        FILTER_TYPE = "highpass"
+        FILTER_CONFIG = {"cutoff": 0.5, "order": 4}
+        fs = 4.2144
+        USE_SCALING = True
+        print(f"   Filter type: {FILTER_TYPE}")
+        print(f"   Filter config: {FILTER_CONFIG}")
+        print(f"   Sampling rate: {fs:.4f} Hz")
+        print(f"   Scaling: {'ENABLED' if USE_SCALING else 'DISABLED'}")
+
+    # You can override the filter configuration here if needed:
+    # FILTER_TYPE = 'none'
+    # FILTER_CONFIG = {}
+    # USE_SCALING = False
+
+    print("\nInitializing streaming inference engine...")
 
     # ⚠️ ONLINE ADAPTIVE SCALING: Use with caution!
     # For testing on TRAINING DATA: Set use_online_scaling=False (use fixed pretrained scaler)
     # For NEW sessions/users: Set use_online_scaling=True with LOW adaptation_rate (0.001-0.01)
+    # NOTE: Online scaling only applies if USE_SCALING=True
     inference_engine = StreamingInference(
         model_path=model_path,
         scaler_path=scaler_path,
         window_size=30,
         device=device,
-        use_online_scaling=True,  # ✅ ENABLED: Use online adaptive scaling
+        use_online_scaling=True
+        if USE_SCALING
+        else False,  # ✅ Only use online scaling if scaling enabled
         online_adaptation_rate=0.001,  # Only used if use_online_scaling=True
         online_warmup_samples=100,  # Only used if use_online_scaling=True
+        filter_type=FILTER_TYPE,  # ✅ Loaded from checkpoint
+        filter_config=FILTER_CONFIG,  # ✅ Loaded from checkpoint
+        use_scaling=USE_SCALING,  # ✅ NEW: Loaded from checkpoint
     )
 
     print(f"✓ Model loaded successfully on {device}")
@@ -760,13 +846,15 @@ def main():
     print(f"  Model hidden_size: {inference_engine.model.hidden_size}")
 
     print("\nLoading test data...")
-    df_clean = load_test_data()
+    # Create same filter for batch preprocessing
+    batch_filter = create_filter(FILTER_TYPE, fs, **FILTER_CONFIG)
+    df_clean = load_test_data(filter_strategy=batch_filter)
     print(f"✓ Loaded {len(df_clean)} samples\n")
 
     # DEBUG: Check data ranges
     sensor_columns = ["env0", "raw0", "env1", "raw1", "env2", "raw2", "env3", "raw3"]
     print("\n" + "=" * 70)
-    print("RAW DATA RANGES (before any processing)")
+    print("RAW DATA RANGES (after batch filtering)")
     print("=" * 70)
     for col in sensor_columns:
         vals = df_clean[col].values
