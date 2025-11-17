@@ -29,6 +29,188 @@ from scipy.signal import butter, lfilter
 from collections import deque
 
 
+class StreamingStandardScaler:
+    """
+    Online/streaming version of StandardScaler that adapts to incoming data.
+
+    Uses Welford's algorithm for numerically stable online computation of mean and variance.
+    This allows the scaler to adapt to new data distributions without needing to see all data upfront.
+
+    Useful for:
+    - Handling distribution shift between training and deployment
+    - Adapting to different users/sessions
+    - Online learning scenarios
+
+    The scaler can be initialized with pretrained statistics and then adapt,
+    or start from scratch and learn entirely from streaming data.
+    """
+
+    def __init__(
+        self, n_features, warmup_samples=100, adaptation_rate=0.01, use_pretrained=True
+    ):
+        """
+        Args:
+            n_features: Number of features to scale
+            warmup_samples: Number of samples to collect before starting to scale
+                          (ensures stable initial statistics)
+            adaptation_rate: How fast to adapt to new data (0 = no adaptation, 1 = only use new data)
+                           Typical values: 0.001-0.1
+            use_pretrained: If True, initialize with pretrained scaler stats and adapt slowly
+                          If False, learn from scratch (no pretrained initialization)
+        """
+        self.n_features = n_features
+        self.warmup_samples = warmup_samples
+        self.adaptation_rate = adaptation_rate
+        self.use_pretrained = use_pretrained
+
+        # Statistics (will be initialized from pretrained scaler if available)
+        self.mean_ = np.zeros(n_features)
+        self.var_ = np.ones(n_features)
+        self.scale_ = np.ones(n_features)  # std dev
+
+        # Online statistics tracking (Welford's algorithm)
+        self.n_samples_seen_ = 0
+        self.M2_ = np.zeros(n_features)  # Sum of squared differences from mean
+
+        # Warmup buffer (collect samples before scaling)
+        self.warmup_buffer = []
+        self.is_warmed_up = False
+
+    def initialize_from_pretrained(self, pretrained_scaler):
+        """
+        Initialize statistics from a pretrained StandardScaler.
+        This provides a good starting point that adapts to new data.
+        """
+        if hasattr(pretrained_scaler, "mean_"):
+            self.mean_ = pretrained_scaler.mean_.copy()
+        if hasattr(pretrained_scaler, "var_"):
+            self.var_ = pretrained_scaler.var_.copy()
+        if hasattr(pretrained_scaler, "scale_"):
+            self.scale_ = pretrained_scaler.scale_.copy()
+
+        # Mark as warmed up since we have pretrained stats
+        if self.use_pretrained:
+            self.is_warmed_up = True
+            print(
+                f"✓ Initialized with pretrained statistics (mean range: [{self.mean_.min():.3f}, {self.mean_.max():.3f}])"
+            )
+            print(
+                f"  Adaptation rate: {self.adaptation_rate} (will slowly adapt to new data)"
+            )
+
+    def partial_fit(self, X):
+        """
+        Update statistics with a new sample using Welford's algorithm.
+
+        Welford's algorithm for online variance:
+        For each new sample x:
+          n = n + 1
+          delta = x - mean
+          mean = mean + delta / n
+          M2 = M2 + delta * (x - mean)
+          variance = M2 / (n - 1)
+        """
+        if len(X.shape) == 1:
+            X = X.reshape(1, -1)
+
+        for sample in X:
+            # Warmup phase: collect samples before computing stable statistics
+            if not self.is_warmed_up:
+                self.warmup_buffer.append(sample)
+
+                if len(self.warmup_buffer) >= self.warmup_samples:
+                    # Warmup complete - compute initial statistics from buffer
+                    warmup_data = np.array(self.warmup_buffer)
+
+                    if not self.use_pretrained:
+                        # Learn from scratch using warmup data
+                        self.mean_ = warmup_data.mean(axis=0)
+                        self.var_ = warmup_data.var(axis=0)
+                        self.scale_ = np.sqrt(self.var_)
+                        self.n_samples_seen_ = len(warmup_data)
+                        self.M2_ = self.var_ * (self.n_samples_seen_ - 1)
+                        print(f"✓ Warmup complete with {len(warmup_data)} samples")
+                        print(
+                            f"  Learned mean range: [{self.mean_.min():.3f}, {self.mean_.max():.3f}]"
+                        )
+                    else:
+                        # We already have pretrained stats, just update counters
+                        self.n_samples_seen_ = len(warmup_data)
+                        # Initialize M2 based on current variance
+                        self.M2_ = self.var_ * max(1, self.n_samples_seen_ - 1)
+                        print(
+                            f"✓ Warmup complete with {len(warmup_data)} samples (using pretrained stats)"
+                        )
+
+                    self.is_warmed_up = True
+                    self.warmup_buffer = []  # Clear buffer to save memory
+
+                continue
+
+            # Online update using Welford's algorithm with adaptation rate
+            self.n_samples_seen_ += 1
+
+            # Compute update with adaptation rate (exponential moving average style)
+            delta = sample - self.mean_
+
+            if self.adaptation_rate > 0:
+                # Adaptive update: blend old and new statistics
+                # Lower adaptation_rate = more stable (slower to adapt)
+                # Higher adaptation_rate = more responsive (faster to adapt)
+                effective_n = min(1.0 / self.adaptation_rate, self.n_samples_seen_)
+
+                self.mean_ = self.mean_ + delta / effective_n
+                delta2 = sample - self.mean_
+                self.M2_ = self.M2_ + delta * delta2
+
+                # Update variance and scale with smoothing
+                if self.n_samples_seen_ > 1:
+                    new_var = self.M2_ / (effective_n - 1)
+                    # Exponential moving average for variance
+                    self.var_ = (
+                        1 - self.adaptation_rate
+                    ) * self.var_ + self.adaptation_rate * new_var
+                    self.scale_ = np.sqrt(
+                        np.maximum(self.var_, 1e-8)
+                    )  # Avoid division by zero
+            else:
+                # No adaptation - keep pretrained statistics
+                pass
+
+    def transform(self, X):
+        """
+        Scale features using current mean and std.
+        Also updates statistics in the background (online learning).
+        """
+        if len(X.shape) == 1:
+            X = X.reshape(1, -1)
+
+        # Update statistics with this sample (online learning)
+        self.partial_fit(X)
+
+        # Scale using current statistics
+        if self.is_warmed_up:
+            X_scaled = (X - self.mean_) / np.maximum(self.scale_, 1e-8)
+        else:
+            # During warmup, use pretrained stats if available, else pass through
+            if self.use_pretrained and np.any(self.scale_ != 1.0):
+                X_scaled = (X - self.mean_) / np.maximum(self.scale_, 1e-8)
+            else:
+                X_scaled = X  # Pass through during warmup
+
+        return X_scaled
+
+    def get_stats(self):
+        """Return current statistics for debugging/monitoring."""
+        return {
+            "mean": self.mean_.copy(),
+            "std": self.scale_.copy(),
+            "var": self.var_.copy(),
+            "n_samples": self.n_samples_seen_,
+            "is_warmed_up": self.is_warmed_up,
+        }
+
+
 class StreamingHighPassFilter:
     def __init__(self, fs, cutoff=0.5, order=4):
         self.fs = fs
@@ -96,10 +278,36 @@ class LSTMModel(nn.Module):
 
 
 class StreamingInference:
-    def __init__(self, model_path, scaler_path, window_size=30, device="cpu"):
+    def __init__(
+        self,
+        model_path,
+        scaler_path,
+        window_size=30,
+        device="cpu",
+        use_online_scaling=True,
+        online_adaptation_rate=0.1,
+        online_warmup_samples=100,
+    ):
+        """
+        Initialize streaming inference with optional online scaling.
+
+        Args:
+            model_path: Path to trained LSTM model
+            scaler_path: Path to pretrained StandardScaler
+            window_size: Size of sliding window for LSTM input
+            device: 'cpu' or 'cuda'
+            use_online_scaling: If True, use adaptive online scaler that learns from incoming data
+                               If False, use fixed pretrained scaler
+            online_adaptation_rate: How fast online scaler adapts (0.001-0.1)
+                                   Lower = more stable, Higher = more responsive
+            online_warmup_samples: Number of samples to collect before online scaling starts
+        """
         self.window_size = window_size
         self.device = torch.device(device)
-        self.scaler = joblib.load(scaler_path)
+        self.use_online_scaling = use_online_scaling
+
+        # Load pretrained scaler
+        pretrained_scaler = joblib.load(scaler_path)
 
         sensor_columns = [
             "env0",
@@ -122,6 +330,30 @@ class StreamingInference:
         n_inputs = len(sensor_columns)
         n_outputs = 6
 
+        # Initialize scaler (online or fixed)
+        if use_online_scaling:
+            print(f"\n{'=' * 70}")
+            print("ONLINE ADAPTIVE SCALING ENABLED")
+            print(f"{'=' * 70}")
+            self.scaler = StreamingStandardScaler(
+                n_features=n_inputs,
+                warmup_samples=online_warmup_samples,
+                adaptation_rate=online_adaptation_rate,
+                use_pretrained=True,  # Start with pretrained stats
+            )
+            self.scaler.initialize_from_pretrained(pretrained_scaler)
+            print(f"  Warmup samples: {online_warmup_samples}")
+            print(f"  Adaptation rate: {online_adaptation_rate}")
+            print("  → Scaler will adapt to distribution shifts in real-time")
+            print(f"{'=' * 70}\n")
+        else:
+            print(f"\n{'=' * 70}")
+            print("FIXED PRETRAINED SCALING")
+            print(f"{'=' * 70}")
+            self.scaler = pretrained_scaler
+            print("  Using fixed pretrained scaler (no adaptation)")
+            print(f"{'=' * 70}\n")
+
         self.model = LSTMModel(
             n_inputs=n_inputs,
             n_outputs=n_outputs,
@@ -143,13 +375,16 @@ class StreamingInference:
         self.window_buffer = deque(maxlen=window_size)
 
         # Initialize streaming high-pass filter for env channels
-        # ⚠️ CRITICAL: This MUST match the actual training data sample rate!
-        # Run the training notebook's sampling rate analysis cell to get the measured value
-        fs = 30.0  # Hz - Updated to match Arduino (33ms delay) and data collection (30 Hz target)
-        print(f"✓ Using sampling rate: {fs} Hz for high-pass filter")
+        # ⚠️ CRITICAL: This MUST match the training data sample rate!
+        # The training notebook measured: MEASURED_SAMPLE_RATE = 4.2144 Hz
+        # NOT the Arduino rate (30 Hz) - the actual rate in the data files is ~4.21 Hz
+        fs = 4.2144  # Hz - MEASURED from training data timestamps
+        print(f"Using sampling rate: {fs} Hz for high-pass filter (matches training)")
         self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
 
-        # Define neighbor relationships for spatial features (matching notebook)
+        # Define neighbor relationships for spatial features (MUST match notebook exactly!)
+        # Training notebook uses 1-indexed: {1: [], 2: [3], 3: [2, 4], 4: [3]}
+        # Convert to 0-indexed for array access in inference
         self.neighbors = {1: [2], 2: [1, 4], 3: [4], 4: [2, 3]}
 
     def compute_spatial_features(self, raw_values, env_values):
@@ -176,26 +411,22 @@ class StreamingInference:
 
     def process_sample(self, raw_sample):
         """
-        Process a single incoming sample with true streaming behavior.
+        Process a single incoming sample.
 
         Args:
             raw_sample: Array of [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
-                       All values are RAW (unfiltered) as they would come from sensors
+                       env values are ALREADY FILTERED (batch-filtered in load_test_data)
+                       raw values are unfiltered
 
         Returns:
             Scaled feature vector ready for windowing
         """
-        # Extract raw sensor values
-        env_values_raw = raw_sample[
+        # Extract sensor values
+        # ⚠️ env values are ALREADY BATCH-FILTERED (done in load_test_data to match training)
+        env_values_filtered = raw_sample[
             ::2
-        ].copy()  # env0, env1, env2, env3 (raw from sensor)
+        ].copy()  # env0, env1, env2, env3 (already filtered)
         raw_values = raw_sample[1::2].copy()  # raw0, raw1, raw2, raw3 (unfiltered)
-
-        # Apply streaming high-pass filter to env values (causal, online filtering)
-        # This uses lfilter internally, processing one sample at a time with filter state
-        env_values_filtered = np.array(
-            [self.highpass_filter.filter(env_values_raw[i], i) for i in range(4)]
-        )
 
         # Compute spatial features using FILTERED env and UNFILTERED raw
         raw_diffs, env_diffs = self.compute_spatial_features(
@@ -210,11 +441,33 @@ class StreamingInference:
 
         features = np.concatenate([interleaved_sensors, raw_diffs, env_diffs])
 
-        features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
+        # Scale features using online scaler (adapts) or fixed scaler (no adaptation)
+        if self.use_online_scaling:
+            # Online scaler automatically updates statistics during transform
+            features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
+        else:
+            # Fixed pretrained scaler (traditional approach)
+            features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
 
         self.window_buffer.append(features_scaled)
 
         return features_scaled
+
+    def get_scaler_stats(self):
+        """
+        Get current scaler statistics for monitoring/debugging.
+        Useful for tracking how the online scaler adapts over time.
+        """
+        if self.use_online_scaling:
+            return self.scaler.get_stats()
+        else:
+            return {
+                "mean": self.scaler.mean_,
+                "std": self.scaler.scale_,
+                "var": self.scaler.var_,
+                "n_samples": "N/A (fixed scaler)",
+                "is_warmed_up": True,
+            }
 
     def predict(self):
         if len(self.window_buffer) < self.window_size:
@@ -236,14 +489,14 @@ class StreamingInference:
 
 def load_test_data():
     """
-    Load test data WITHOUT pre-filtering for true streaming simulation.
+    Load test data and apply BATCH filtering to match training preprocessing.
 
-    The data is loaded in its raw form as it would come from sensors.
-    Filtering will be applied sample-by-sample during streaming using
-    the causal StreamingHighPassFilter.
+    CRITICAL: The training notebook applies lfilter() to the ENTIRE signal at once,
+    which gives different filter transient behavior than sample-by-sample filtering.
+    To match training exactly, we must apply the same batch filtering here.
 
     Returns:
-        DataFrame with raw sensor data (unfiltered)
+        DataFrame with batch-filtered env channels (matches training preprocessing)
     """
     dirs = ["data/tobias/test"]
     # dirs = ["data/afras/raw"]
@@ -282,14 +535,33 @@ def load_test_data():
 
     df_clean = df.dropna(subset=numeric_columns)
 
-    # NO FILTERING APPLIED HERE - data remains raw as from sensors
-    # Filtering happens online in StreamingInference.process_sample()
-    # using causal lfilter to simulate true real-time streaming
+    # ⚠️ APPLY BATCH FILTERING TO MATCH TRAINING!
+    # Training applies: df_clean[col] = lfilter(b, a, df_clean[col].values)
+    # This is different from streaming sample-by-sample filtering
+    print("\nApplying batch high-pass filter to env channels (matching training)...")
+    from scipy.signal import butter, lfilter
+
+    fs = 4.2144  # MEASURED sample rate from training
+    cutoff = 0.5
+    order = 4
+    b, a = butter(order, cutoff / (0.5 * fs), btype="high")
+
+    for col in ["env0", "env1", "env2", "env3"]:
+        df_clean[col] = lfilter(b, a, df_clean[col].values)
+
+    print("Batch filtering complete - data now matches training preprocessing")
 
     return df_clean
 
 
-def simulate_streaming(inference_engine, df_clean, num_samples=1000, start_idx=0):
+def simulate_streaming(
+    inference_engine,
+    df_clean,
+    num_samples=1000,
+    start_idx=0,
+    show_scaler_stats=True,
+    debug_features=False,
+):
     sensor_columns = ["env0", "raw0", "env1", "raw1", "env2", "raw2", "env3", "raw3"]
     finger_columns = ["thumb_tip", "thumb_base", "index", "middle", "ring", "pinky"]
 
@@ -298,7 +570,29 @@ def simulate_streaming(inference_engine, df_clean, num_samples=1000, start_idx=0
 
     end_idx = min(start_idx + num_samples, len(df_clean))
 
-    print(f"Simulating streaming inference from sample {start_idx} to {end_idx}...")
+    print(f"\n{'=' * 70}")
+    print("STREAMING INFERENCE SIMULATION")
+    print(f"{'=' * 70}")
+    print(f"Samples: {start_idx} to {end_idx} (total: {num_samples})")
+    print(f"{'=' * 70}\n")
+
+    # Track initial scaler stats
+    if show_scaler_stats and inference_engine.use_online_scaling:
+        initial_stats = inference_engine.get_scaler_stats()
+        print("📊 Initial scaler statistics:")
+        print(
+            f"   Mean range: [{initial_stats['mean'].min():.3f}, {initial_stats['mean'].max():.3f}]"
+        )
+        print(
+            f"   Std range:  [{initial_stats['std'].min():.3f}, {initial_stats['std'].max():.3f}]"
+        )
+        print(f"   Samples seen: {initial_stats['n_samples']}")
+        print(f"   Warmed up: {initial_stats['is_warmed_up']}\n")
+
+    # Debug: collect features for first few samples
+    if debug_features:
+        debug_raw_features = []
+        debug_scaled_features = []
 
     for idx in range(start_idx, end_idx):
         row = df_clean.iloc[idx]
@@ -306,7 +600,12 @@ def simulate_streaming(inference_engine, df_clean, num_samples=1000, start_idx=0
         sensor_values = row[sensor_columns].values.astype(np.float32)
         finger_values = row[finger_columns].values.astype(np.float32)
 
-        inference_engine.process_sample(sensor_values)
+        scaled_features = inference_engine.process_sample(sensor_values)
+
+        # Collect debug info for first 5 samples
+        if debug_features and idx < start_idx + 5:
+            debug_raw_features.append(sensor_values.copy())
+            debug_scaled_features.append(scaled_features.copy())
 
         prediction = inference_engine.predict()
 
@@ -314,11 +613,60 @@ def simulate_streaming(inference_engine, df_clean, num_samples=1000, start_idx=0
             predictions.append(prediction)
             ground_truth.append(finger_values)
 
+        # Show progress with scaler stats updates
         if (idx - start_idx + 1) % 100 == 0:
-            print(f"  Processed {idx - start_idx + 1}/{num_samples} samples...")
+            print(f"  Processed {idx - start_idx + 1}/{num_samples} samples...", end="")
+
+            if show_scaler_stats and inference_engine.use_online_scaling:
+                stats = inference_engine.get_scaler_stats()
+                print(
+                    f" [Scaler: {stats['n_samples']} samples, warmed_up={stats['is_warmed_up']}]"
+                )
+            else:
+                print()
+
+    # Show debug features
+    if debug_features and len(debug_scaled_features) > 0:
+        print(f"\n{'=' * 70}")
+        print("DEBUG: First processed sample features")
+        print(f"{'=' * 70}")
+        print(f"Raw sensor input: {debug_raw_features[0]}")
+        print(f"Scaled features (16 total): {debug_scaled_features[0]}")
+        print(f"Feature shape: {debug_scaled_features[0].shape}")
+        print(
+            f"Feature range: [{debug_scaled_features[0].min():.3f}, {debug_scaled_features[0].max():.3f}]"
+        )
+        print(f"{'=' * 70}\n")
 
     predictions = np.array(predictions)
     ground_truth = np.array(ground_truth)
+
+    # Show final scaler statistics and adaptation
+    if show_scaler_stats and inference_engine.use_online_scaling:
+        final_stats = inference_engine.get_scaler_stats()
+        print(f"\n{'=' * 70}")
+        print(f"📊 FINAL SCALER STATISTICS (after {final_stats['n_samples']} samples)")
+        print(f"{'=' * 70}")
+        print(
+            f"Mean range: [{final_stats['mean'].min():.3f}, {final_stats['mean'].max():.3f}]"
+        )
+        print(
+            f"Std range:  [{final_stats['std'].min():.3f}, {final_stats['std'].max():.3f}]"
+        )
+
+        if "initial_stats" in locals():
+            # Show how much the scaler adapted
+            mean_change = np.abs(final_stats["mean"] - initial_stats["mean"]).mean()
+            std_change = np.abs(final_stats["std"] - initial_stats["std"]).mean()
+            print("\nAdaptation from initial:")
+            print(f"  Mean change (avg): {mean_change:.4f}")
+            print(f"  Std change (avg):  {std_change:.4f}")
+
+            if mean_change > 0.1 or std_change > 0.1:
+                print("  ✅ Scaler adapted to distribution shift in data")
+            else:
+                print("  → Scaler remained stable (data similar to training)")
+        print(f"{'=' * 70}\n")
 
     # Debug: Check value ranges
     print("\nPrediction ranges:")
@@ -377,7 +725,7 @@ def visualize_predictions(predictions, ground_truth, n_samples=400):
 def main():
     # model_path = "training/notebooks/best_lstm_model.pth"
     # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
-    model_path = "data/tobias/best_lstm_model.pth"
+    model_path = "data/tobias/lstm_model_complete.pth"
     scaler_path = "data/tobias/scaler_inputs_lstm.pkl"
 
     if not os.path.exists(model_path):
@@ -388,37 +736,61 @@ def main():
         print(f"Error: Scaler file not found at {scaler_path}")
         return
 
-    print("Initializing streaming inference engine...")
+    print("\n" + "=" * 70)
+    print("STREAMING INFERENCE")
+    print("=" * 70)
+    print("\nInitializing streaming inference engine...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # ⚠️ ONLINE ADAPTIVE SCALING: Use with caution!
+    # For testing on TRAINING DATA: Set use_online_scaling=False (use fixed pretrained scaler)
+    # For NEW sessions/users: Set use_online_scaling=True with LOW adaptation_rate (0.001-0.01)
     inference_engine = StreamingInference(
-        model_path=model_path, scaler_path=scaler_path, window_size=30, device=device
+        model_path=model_path,
+        scaler_path=scaler_path,
+        window_size=30,
+        device=device,
+        use_online_scaling=True,  # ✅ ENABLED: Use online adaptive scaling
+        online_adaptation_rate=0.001,  # Only used if use_online_scaling=True
+        online_warmup_samples=100,  # Only used if use_online_scaling=True
     )
-    print(f"Model loaded successfully on {device}")
-    print(f"Model num_layers: {inference_engine.model.num_layers}")
-    print(f"Model hidden_size: {inference_engine.model.hidden_size}")
+
+    print(f"✓ Model loaded successfully on {device}")
+    print(f"  Model num_layers: {inference_engine.model.num_layers}")
+    print(f"  Model hidden_size: {inference_engine.model.hidden_size}")
 
     print("\nLoading test data...")
     df_clean = load_test_data()
-    print(f"Loaded {len(df_clean)} samples")
+    print(f"✓ Loaded {len(df_clean)} samples\n")
 
     # DEBUG: Check data ranges
     sensor_columns = ["env0", "raw0", "env1", "raw1", "env2", "raw2", "env3", "raw3"]
-    print("\nData ranges after loading:")
+    print("\n" + "=" * 70)
+    print("RAW DATA RANGES (before any processing)")
+    print("=" * 70)
     for col in sensor_columns:
         vals = df_clean[col].values
         print(
-            f"  {col}: min={vals.min():.4f}, max={vals.max():.4f}, mean={vals.mean():.4f}"
+            f"  {col}: min={vals.min():.4f}, max={vals.max():.4f}, mean={vals.mean():.4f}, std={vals.std():.4f}"
         )
+    print("=" * 70 + "\n")
 
+    # ⚠️ IMPORTANT: Skip initial samples to allow filter to stabilize
+    # The training applies lfilter to entire signal, so first ~100 samples have filter transient
+    # Start from later in dataset for fair comparison
     predictions, ground_truth = simulate_streaming(
-        inference_engine, df_clean, num_samples=1000, start_idx=1000
+        inference_engine,
+        df_clean,
+        num_samples=2000,
+        start_idx=5000,
+        debug_features=True,
     )
 
     print(f"\nGenerated {len(predictions)} predictions")
 
     compute_metrics(predictions, ground_truth)
 
-    visualize_predictions(predictions, ground_truth, n_samples=5000)
+    visualize_predictions(predictions, ground_truth, n_samples=2000)
 
 
 if __name__ == "__main__":
