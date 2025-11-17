@@ -767,7 +767,7 @@ def main():
     # Extract filter configuration from checkpoint (if available)
     if isinstance(checkpoint, dict) and "hyperparameters" in checkpoint:
         hyperparams = checkpoint["hyperparameters"]
-        FILTER_TYPE = hyperparams.get("filter_type", "highpass")
+        FILTER_TYPE = hyperparams.get("filter_type", "none")
         FILTER_CONFIG = hyperparams.get("filter_config", {"cutoff": 0.5, "order": 4})
         fs = hyperparams.get("sampling_rate", 4.2144)
 
