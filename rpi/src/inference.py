@@ -143,8 +143,12 @@ class RealtimeInference:
         # Initialize sliding window buffer
         self.window_buffer = deque(maxlen=window_size)
 
-        # Initialize streaming high-pass filter for env channels (matching inference_streaming.py)
-        fs = 1.0 / 0.03446  # Same sampling rate as inference_streaming.py
+        # Initialize streaming high-pass filter for env channels
+        # ⚠️ CRITICAL: This MUST match the actual training data sample rate!
+        # Run the training notebook's sampling rate analysis cell to get the measured value
+        # The old hardcoded value (1.0/0.03446 = 29.03 Hz) may not match your actual data
+        fs = 30.0  # Hz - Updated to match Arduino (33ms delay) and data collection (30 Hz target)
+        print(f"✓ Using sampling rate: {fs} Hz for high-pass filter")
         self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
 
         # Define neighbor relationships for spatial features (matching notebook)
@@ -258,7 +262,7 @@ class RealtimeInference:
         )
 
         # Get prediction
-        with torch.no_grad:
+        with torch.no_grad():
             prediction = self.model(window_tensor)
 
         # Clamp predictions to valid range [0, 1] (matching inference_streaming.py)
@@ -286,92 +290,113 @@ class RealtimeInference:
     def run_realtime(self, port, baudrate=115200):
         """
         Run real-time inference from sensor data using simple serial communication.
-        Matches main.py's approach.
+        Matches main.py's approach with RATE CONTROL for consistent sampling.
 
         Args:
             port: Serial port name (e.g., "COM3", "/dev/ttyAMA0")
             baudrate: Serial port baud rate
         """
         print("\n" + "=" * 60)
-        print("REAL-TIME STREAMING INFERENCE")
+        print("REAL-TIME STREAMING INFERENCE WITH RATE CONTROL")
         print("=" * 60)
         print(f"Port: {port}")
         print(f"Baudrate: {baudrate}")
+
+        # CRITICAL: Match the training data sample rate
+        target_sample_rate = 30.0  # Hz (matches Arduino 33ms delay and data collection)
+        sample_interval = 1.0 / target_sample_rate
+
+        print(
+            f"🎯 Target sample rate: {target_sample_rate} Hz ({sample_interval * 1000:.1f}ms interval)"
+        )
+        print("   This MUST match your training data sample rate!")
         print("Press Ctrl+C to stop")
         print("=" * 60 + "\n")
 
         # Open serial port (same as main.py)
-        ser = serial.Serial(port, baudrate, timeout=0.1)
+        ser = serial.Serial(
+            port, baudrate, timeout=0.01
+        )  # Shorter timeout for responsiveness
 
         start_time = time.time()
         last_display_time = start_time
+        last_sample_time = start_time
 
         # Diagnostics
         samples_received = 0
         predictions_made = 0
+        samples_processed = 0
+
+        # Buffer for latest sensor reading
+        latest_sensor_reading = None
 
         try:
             while True:
+                current_time = time.time()
+
+                # CONTINUOUSLY read from serial (non-blocking, keep data fresh)
                 try:
-                    # Read line from serial port (same as main.py)
                     line = ser.readline().decode().strip()
 
-                    if not line:
-                        continue
+                    if line:
+                        # Parse Arduino format: S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env
+                        parts = line.split(";")
+                        if len(parts) == 4:
+                            sensor_data = {}
+                            for part in parts:
+                                if ":" not in part:
+                                    continue
+                                sensor_id, values = part.split(":")
+                                raw, env = values.split(",")
+                                sensor_data[sensor_id] = (float(raw), float(env))
 
-                    # Parse Arduino format: S4:raw,env;S3:raw,env;S2:raw,env;S1:raw,env
-                    parts = line.split(";")
-                    if len(parts) != 4:
-                        continue
+                            # Check we got all sensors
+                            if all(s in sensor_data for s in ["S1", "S2", "S3", "S4"]):
+                                # Map to expected format: [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
+                                # S4 = sensor 0, S3 = sensor 1, S2 = sensor 2, S1 = sensor 3
+                                latest_sensor_reading = np.array(
+                                    [
+                                        sensor_data["S4"][1],  # env0
+                                        sensor_data["S4"][0],  # raw0
+                                        sensor_data["S3"][1],  # env1
+                                        sensor_data["S3"][0],  # raw1
+                                        sensor_data["S2"][1],  # env2
+                                        sensor_data["S2"][0],  # raw2
+                                        sensor_data["S1"][1],  # env3
+                                        sensor_data["S1"][0],  # raw3
+                                    ],
+                                    dtype=np.float32,
+                                )
+                                samples_received += 1
+                except Exception:
+                    pass  # Ignore parse errors, keep trying
 
-                    sensor_data = {}
-                    for part in parts:
-                        if ":" not in part:
-                            continue
-                        sensor_id, values = part.split(":")
-                        raw, env = values.split(",")
-                        sensor_data[sensor_id] = (float(raw), float(env))
+                # PROCESS at controlled rate (matching training data)
+                time_since_last_sample = current_time - last_sample_time
 
-                    # Check we got all sensors
-                    if not all(s in sensor_data for s in ["S1", "S2", "S3", "S4"]):
-                        continue
+                if time_since_last_sample >= sample_interval:
+                    last_sample_time = current_time
 
-                    # Map to expected format: [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
-                    # S4 = sensor 0, S3 = sensor 1, S2 = sensor 2, S1 = sensor 3
-                    sensor_values = np.array(
-                        [
-                            sensor_data["S4"][1],  # env0
-                            sensor_data["S4"][0],  # raw0
-                            sensor_data["S3"][1],  # env1
-                            sensor_data["S3"][0],  # raw1
-                            sensor_data["S2"][1],  # env2
-                            sensor_data["S2"][0],  # raw2
-                            sensor_data["S1"][1],  # env3
-                            sensor_data["S1"][0],  # raw3
-                        ],
-                        dtype=np.float32,
-                    )
+                    if latest_sensor_reading is not None:
+                        samples_processed += 1
 
-                    samples_received += 1
+                        # Process sample
+                        self.process_sample(latest_sensor_reading)
 
-                    # Process sample
-                    self.process_sample(sensor_values)
+                        # Make prediction (only when buffer is full)
+                        prediction = self.predict()
 
-                    # Make prediction (only when buffer is full)
-                    prediction = self.predict()
+                        if prediction is not None:
+                            predictions_made += 1
 
-                    if prediction is not None:
-                        predictions_made += 1
+                            # Convert predictions [0,1] to servo values [0,1023]
+                            servo_values = (prediction * 1023).astype(int)
+                            servo_values = np.clip(servo_values, 0, 1023)
 
-                        # Convert predictions [0,1] to servo values [0,1023]
-                        servo_values = (prediction * 1023).astype(int)
-                        servo_values = np.clip(servo_values, 0, 1023)
+                            # Send servo commands to Arduino (same as main.py)
+                            msg = ",".join(map(str, servo_values)) + "\n"
+                            ser.write(msg.encode())
 
-                        # Send servo commands to Arduino (same as main.py)
-                        msg = ",".join(map(str, servo_values)) + "\n"
-                        ser.write(msg.encode())
-
-                        current_time = time.time()
                         time_since_last = current_time - last_display_time
 
                         # Display prediction every 0.5 seconds
@@ -380,33 +405,39 @@ class RealtimeInference:
                             sample_fps = (
                                 samples_received / elapsed if elapsed > 0 else 0
                             )
+                            process_fps = (
+                                samples_processed / elapsed if elapsed > 0 else 0
+                            )
                             pred_fps = predictions_made / elapsed if elapsed > 0 else 0
 
+                            # Calculate actual processing rate
+                            # actual_rate = 1.0 / time_since_last_sample if time_since_last_sample > 0 else 0
+
                             print(
-                                f"\n[Samples: {samples_received} | Predictions: {predictions_made}]"
+                                f"\n[Received: {samples_received} | Processed: {samples_processed} | Predictions: {predictions_made}]"
                             )
                             print(
-                                f"Sample FPS: {sample_fps:.1f} | Prediction FPS: {pred_fps:.1f}"
+                                f"Receive rate: {sample_fps:.1f} Hz | Process rate: {process_fps:.1f} Hz (target: {target_sample_rate:.1f} Hz) | Pred rate: {pred_fps:.1f} Hz"
                             )
-                            print("Predictions:")
-                            for i, name in enumerate(self.finger_names):
-                                bar = "█" * int(prediction[i] * 20)
-                                servo_val = servo_values[i]
-                                print(
-                                    f"  {name:<12}: {prediction[i]:.3f} {bar} (servo: {servo_val})"
-                                )
+
+                            # Only display predictions if we have valid predictions
+                            if prediction is not None:
+                                print("Predictions:")
+                                for i, name in enumerate(self.finger_names):
+                                    bar = "█" * int(prediction[i] * 20)
+                                    servo_val = servo_values[i]
+                                    print(
+                                        f"  {name:<12}: {prediction[i]:.3f} {bar} (servo: {servo_val})"
+                                    )
+                            else:
+                                print("Predictions: Waiting for buffer to fill...")
 
                             last_display_time = current_time
-
-                except Exception as e:
-                    print(f"Error processing sample: {e}")
-                    import traceback
-
-                    traceback.print_exc()
 
         except KeyboardInterrupt:
             print("\n\nStopping real-time inference...")
             print(f"Total samples received: {samples_received}")
+            print(f"Total samples processed: {samples_processed}")
             print(f"Total predictions made: {predictions_made}")
             elapsed = time.time() - start_time
             if elapsed > 0:
@@ -421,7 +452,9 @@ class RealtimeInference:
 def main():
     # Configuration
     model_path = "training/notebooks/best_lstm_model.pth"
-    scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    # model_path = "data/martin6/best_lstm_model.pth"
+    scaler_path = "data/martin6/scaler_inputs_lstm.pkl"
 
     # Hardware configuration
     if sys.platform == "darwin":

@@ -18,5 +18,5 @@ void loop() {
     if (i < 3) Serial.print(";");
   }
   Serial.println();
-  delay(10);
+  delay(33);  // ~30Hz sampling rate (matches data collection and inference)
 }

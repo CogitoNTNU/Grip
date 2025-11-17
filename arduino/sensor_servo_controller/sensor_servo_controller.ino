@@ -79,5 +79,5 @@ void loop() {
     }
   }
 
-  delay(10);  // 100Hz sampling rate
+  delay(33);  // ~30Hz sampling rate (matches data collection)
 }

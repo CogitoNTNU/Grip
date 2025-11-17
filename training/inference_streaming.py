@@ -143,11 +143,14 @@ class StreamingInference:
         self.window_buffer = deque(maxlen=window_size)
 
         # Initialize streaming high-pass filter for env channels
-        fs = 1.0 / 0.03446
+        # ⚠️ CRITICAL: This MUST match the actual training data sample rate!
+        # Run the training notebook's sampling rate analysis cell to get the measured value
+        fs = 30.0  # Hz - Updated to match Arduino (33ms delay) and data collection (30 Hz target)
+        print(f"✓ Using sampling rate: {fs} Hz for high-pass filter")
         self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
 
         # Define neighbor relationships for spatial features (matching notebook)
-        self.neighbors = {1: [], 2: [3], 3: [2, 4], 4: [3]}
+        self.neighbors = {1: [2], 2: [1, 4], 3: [4], 4: [2, 3]}
 
     def compute_spatial_features(self, raw_values, env_values):
         raw_diffs = []
@@ -242,7 +245,7 @@ def load_test_data():
     Returns:
         DataFrame with raw sensor data (unfiltered)
     """
-    dirs = ["data/martin3/raw"]
+    dirs = ["data/tobias/test"]
     # dirs = ["data/afras/raw"]
 
     csv_files = []
@@ -372,8 +375,10 @@ def visualize_predictions(predictions, ground_truth, n_samples=400):
 
 
 def main():
-    model_path = "training/notebooks/best_lstm_model.pth"
-    scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    # model_path = "training/notebooks/best_lstm_model.pth"
+    # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    model_path = "data/tobias/best_lstm_model.pth"
+    scaler_path = "data/tobias/scaler_inputs_lstm.pkl"
 
     if not os.path.exists(model_path):
         print(f"Error: Model file not found at {model_path}")

@@ -156,8 +156,11 @@ class DebugInference:
         # Initialize sliding window buffer
         self.window_buffer = deque(maxlen=window_size)
 
-        # Initialize streaming high-pass filter for env channels (matching inference_streaming.py)
-        fs = 1.0 / 0.03446  # Same as inference_streaming.py
+        # Initialize streaming high-pass filter for env channels
+        # ⚠️ CRITICAL: This MUST match the actual training data sample rate!
+        # Run the training notebook's sampling rate analysis cell to get the measured value
+        fs = 30.0  # Hz - Updated to match Arduino (33ms delay) and data collection (30 Hz target)
+        print(f"✓ Using sampling rate: {fs} Hz for high-pass filter")
         self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
 
         # Define neighbor relationships for spatial features (matching notebook)
@@ -394,7 +397,7 @@ class DebugInference:
         print("\n" + "=" * 80)
         print("CSV REPLAY + HARDWARE CONTROL MODE")
         print("=" * 80)
-        print("Data source: martin3/raw")
+        print("Data source: martin6/test")
         print(f"Hardware port: {port}")
         print(f"Starting at sample: {start_idx}")
         print(f"Processing {num_samples} samples")
@@ -495,7 +498,7 @@ class DebugInference:
                     predictions_made += 1
 
                     # Convert to servo values [0, 1023]
-                    servo_values = ((1 - prediction) * 1023).astype(int)
+                    servo_values = ((prediction) * 1023).astype(int)
                     servo_values = np.clip(servo_values, 0, 1023)
 
                     if predictions_made == 1:
@@ -1025,8 +1028,10 @@ class DebugInference:
 
 def main():
     # Configuration (matching inference_streaming.py)
-    model_path = "training/notebooks/best_lstm_model.pth"
-    scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    # model_path = "training/notebooks/best_lstm_model.pth"
+    # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
+    model_path = "data/martin6/best_lstm_model.pth"
+    scaler_path = "data/martin6/scaler_inputs_lstm.pkl"
 
     # ==============================================================================
     # MODE SELECTION: Choose what you want to debug
@@ -1035,10 +1040,11 @@ def main():
     # "hardware"     - Control actual hand with live Arduino data (no CSV)
     # "csv+hardware" - Replay CSV data AND send predictions to actual hand (BEST FOR DEBUGGING!)
     # ==============================================================================
-    MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
+    # MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
+    MODE = "hardware"
 
     # CSV Simulation Settings (for "csv" and "csv+hardware" modes)
-    data_dir = "data/martin3/raw"
+    data_dir = "data/martin6/test"
     start_idx = 1000  # Skip initial samples for stability
     num_samples = 1000  # Number of samples to process
     playback_speed = (
