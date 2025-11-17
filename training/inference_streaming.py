@@ -498,7 +498,7 @@ def load_test_data():
     Returns:
         DataFrame with batch-filtered env channels (matches training preprocessing)
     """
-    dirs = ["data/tobias/test"]
+    dirs = ["data/tobias/raw"]
     # dirs = ["data/afras/raw"]
 
     csv_files = []
