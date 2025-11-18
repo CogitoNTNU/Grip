@@ -631,7 +631,7 @@ def load_test_data(filter_strategy: FilterStrategy = None):
     Returns:
         DataFrame with optionally filtered env channels
     """
-    dirs = ["data/tobias/test"]
+    dirs = ["data/tobias/test2"]
     # dirs = ["data/afras/raw"]
 
     csv_files = []

@@ -5,7 +5,6 @@ import joblib
 import time
 import glob
 import os
-from scipy.signal import butter, lfilter
 from collections import deque
 import sys
 import matplotlib.pyplot as plt
@@ -14,22 +13,142 @@ import matplotlib
 matplotlib.use("TkAgg")  # Use TkAgg backend for interactive plotting
 import serial as pyserial  # For hardware communication (renamed to avoid conflicts)
 
+# Add parent directory to path for filter strategies
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from training.filter_strategies import create_filter
 
-class StreamingHighPassFilter:
-    def __init__(self, fs, cutoff=0.5, order=4):
-        self.fs = fs
-        self.cutoff = cutoff
-        self.order = order
-        nyq = 0.5 * fs
-        normal_cutoff = cutoff / nyq
-        self.b, self.a = butter(order, normal_cutoff, btype="high", analog=False)
-        self.zi = {i: np.zeros(max(len(self.a), len(self.b)) - 1) for i in range(4)}
 
-    def filter(self, value, channel):
-        filtered_value, self.zi[channel] = lfilter(
-            self.b, self.a, [value], zi=self.zi[channel]
-        )
-        return filtered_value[0]
+class StreamingStandardScaler:
+    """
+    Online/streaming version of StandardScaler that adapts to incoming data.
+
+    Uses Welford's algorithm for numerically stable online computation of mean and variance.
+    """
+
+    def __init__(
+        self, n_features, warmup_samples=100, adaptation_rate=0.01, use_pretrained=True
+    ):
+        """
+        Args:
+            n_features: Number of features to scale
+            warmup_samples: Number of samples to collect before starting to scale
+            adaptation_rate: How fast to adapt to new data (0 = no adaptation, 1 = only use new data)
+                           Typical values: 0.001-0.1
+            use_pretrained: If True, initialize with pretrained scaler stats and adapt slowly
+        """
+        self.n_features = n_features
+        self.warmup_samples = warmup_samples
+        self.adaptation_rate = adaptation_rate
+        self.use_pretrained = use_pretrained
+
+        # Statistics
+        self.mean_ = np.zeros(n_features)
+        self.var_ = np.ones(n_features)
+        self.scale_ = np.ones(n_features)
+
+        # Online statistics tracking (Welford's algorithm)
+        self.n_samples_seen_ = 0
+        self.M2_ = np.zeros(n_features)
+
+        # Warmup buffer
+        self.warmup_buffer = []
+        self.is_warmed_up = False
+
+    def initialize_from_pretrained(self, pretrained_scaler):
+        """Initialize statistics from a pretrained StandardScaler."""
+        if hasattr(pretrained_scaler, "mean_"):
+            self.mean_ = pretrained_scaler.mean_.copy()
+        if hasattr(pretrained_scaler, "var_"):
+            self.var_ = pretrained_scaler.var_.copy()
+        if hasattr(pretrained_scaler, "scale_"):
+            self.scale_ = pretrained_scaler.scale_.copy()
+
+        if self.use_pretrained:
+            self.is_warmed_up = True
+            print(
+                f"  Initialized with pretrained statistics (mean range: [{self.mean_.min():.3f}, {self.mean_.max():.3f}])"
+            )
+            print(
+                f"  Adaptation rate: {self.adaptation_rate} (will slowly adapt to new data)"
+            )
+
+    def partial_fit(self, X):
+        """Update statistics with a new sample using Welford's algorithm."""
+        if len(X.shape) == 1:
+            X = X.reshape(1, -1)
+
+        for sample in X:
+            # Warmup phase
+            if not self.is_warmed_up:
+                self.warmup_buffer.append(sample)
+
+                if len(self.warmup_buffer) >= self.warmup_samples:
+                    warmup_data = np.array(self.warmup_buffer)
+
+                    if not self.use_pretrained:
+                        self.mean_ = warmup_data.mean(axis=0)
+                        self.var_ = warmup_data.var(axis=0)
+                        self.scale_ = np.sqrt(self.var_)
+                        self.n_samples_seen_ = len(warmup_data)
+                        self.M2_ = self.var_ * (self.n_samples_seen_ - 1)
+                        print(f"  Warmup complete with {len(warmup_data)} samples")
+                    else:
+                        self.n_samples_seen_ = len(warmup_data)
+                        self.M2_ = self.var_ * max(1, self.n_samples_seen_ - 1)
+                        print(
+                            f"  Warmup complete with {len(warmup_data)} samples (using pretrained stats)"
+                        )
+
+                    self.is_warmed_up = True
+                    self.warmup_buffer = []
+
+                continue
+
+            # Online update with adaptation rate
+            self.n_samples_seen_ += 1
+            delta = sample - self.mean_
+
+            if self.adaptation_rate > 0:
+                effective_n = min(1.0 / self.adaptation_rate, self.n_samples_seen_)
+                self.mean_ = self.mean_ + delta / effective_n
+                delta2 = sample - self.mean_
+                self.M2_ = self.M2_ + delta * delta2
+
+                if self.n_samples_seen_ > 1:
+                    new_var = self.M2_ / (effective_n - 1)
+                    self.var_ = (
+                        1 - self.adaptation_rate
+                    ) * self.var_ + self.adaptation_rate * new_var
+                    self.scale_ = np.sqrt(np.maximum(self.var_, 1e-8))
+
+    def transform(self, X):
+        """Scale features using current mean and std. Also updates statistics."""
+        if len(X.shape) == 1:
+            X = X.reshape(1, -1)
+
+        # Update statistics
+        self.partial_fit(X)
+
+        # Scale using current statistics
+        if self.is_warmed_up:
+            X_scaled = (X - self.mean_) / np.maximum(self.scale_, 1e-8)
+        else:
+            if self.use_pretrained and np.any(self.scale_ != 1.0):
+                X_scaled = (X - self.mean_) / np.maximum(self.scale_, 1e-8)
+            else:
+                X_scaled = X
+
+        return X_scaled
+
+    def get_stats(self):
+        """Return current statistics for debugging/monitoring."""
+        return {
+            "mean": self.mean_.copy(),
+            "std": self.scale_.copy(),
+            "var": self.var_.copy(),
+            "n_samples": self.n_samples_seen_,
+            "is_warmed_up": self.is_warmed_up,
+        }
 
 
 class LSTMModel(torch.nn.Module):
@@ -104,36 +223,125 @@ class LSTMModel(torch.nn.Module):
 
 class DebugInference:
     def __init__(
-        self, model_path, scaler_path, window_size=30, device="cpu", smoothing_alpha=0.7
+        self,
+        model_path,
+        scaler_path,
+        window_size=50,
+        device="cpu",
+        smoothing_alpha=0.7,
+        feature_window=10,
+        use_online_scaling=False,
+        online_adaptation_rate=0.0001,  # Very slow adaptation (0.1% per sample)
+        online_warmup_samples=500,  # More samples for stable initial statistics
     ):
+        """
+        Args:
+            model_path: Path to model checkpoint
+            scaler_path: Path to pretrained scaler
+            window_size: Number of samples in sliding window
+            device: 'cpu' or 'cuda'
+            smoothing_alpha: Output smoothing (0=max smooth, 1=no smooth)
+            feature_window: Window size for EMG features
+            use_online_scaling: If True, scaler adapts to incoming data
+            online_adaptation_rate: How fast to adapt (0.001-0.1, lower=more stable)
+            online_warmup_samples: Samples to collect before adapting
+        """
         self.window_size = window_size
         self.device = torch.device(device)
+        self.feature_window = feature_window
+        self.use_online_scaling = use_online_scaling
+        self.online_adaptation_rate = online_adaptation_rate
+        self.online_warmup_samples = online_warmup_samples
 
-        # Load scaler
-        self.scaler = joblib.load(scaler_path)
+        # Load checkpoint to determine model configuration
+        checkpoint = torch.load(
+            model_path, map_location=self.device, weights_only=False
+        )
 
-        # Initialize model (matching inference_streaming.py exactly)
-        sensor_columns = [
-            "env0",
-            "raw0",
-            "env1",
-            "raw1",
-            "env2",
-            "raw2",
-            "env3",
-            "raw3",
-            "raw_diff1",
-            "raw_diff2",
-            "raw_diff3",
-            "raw_diff4",
-            "env_diff1",
-            "env_diff2",
-            "env_diff3",
-            "env_diff4",
-        ]
-        n_inputs = len(sensor_columns)
+        # Extract state dict and hyperparameters from checkpoint
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+            hyperparams = checkpoint.get("hyperparameters", {})
+        else:
+            state_dict = checkpoint
+            hyperparams = {}
+
+        # Load configuration from checkpoint (matching training settings)
+        self.filter_type = hyperparams.get("filter_type", "none")
+        self.filter_config = hyperparams.get("filter_config", {})
+        self.use_scaling = hyperparams.get("use_scaling", False)
+        fs = hyperparams.get(
+            "sampling_rate", 30.0
+        )  # Default to 30 Hz if not in checkpoint
+
+        print(f"\n{'=' * 70}")
+        print("LOADED TRAINING CONFIGURATION FROM CHECKPOINT")
+        print(f"{'=' * 70}")
+        print(f"  Filter type: {self.filter_type}")
+        print(f"  Filter config: {self.filter_config}")
+        print(f"  Sampling rate: {fs:.4f} Hz")
+        print(f"  Scaling: {'ENABLED' if self.use_scaling else 'DISABLED'}")
+        print(f"{'=' * 70}\n")
+
+        # Initialize filter using strategy pattern
+        self.filter = create_filter(self.filter_type, fs, **self.filter_config)
+        print(f"Filter strategy: {self.filter.get_description()}")
+
+        # Detect number of input features from model weights
+        # The first LSTM layer's input weight shape is (4*hidden_size, n_inputs)
+        first_lstm_weight = state_dict["lstm_layers.0.weight_ih_l0"]
+        n_inputs = first_lstm_weight.shape[1]  # Extract n_inputs from weight dimensions
         n_outputs = 6
 
+        print(f"\nDetected model with {n_inputs} input features")
+
+        # Determine if EMG features are used
+        self.use_emg_features = n_inputs == 32  # 8 base + 8 spatial + 16 EMG
+
+        if self.use_emg_features:
+            print("EMG FEATURES ENABLED (32 features: 8 base + 8 spatial + 16 EMG)")
+            # Initialize buffers for EMG feature computation
+            self.raw_buffers = {i: deque(maxlen=feature_window) for i in range(4)}
+        else:
+            print("EMG features disabled (16 features: 8 base + 8 spatial)")
+
+        # Load pretrained scaler
+        pretrained_scaler = joblib.load(scaler_path)
+
+        # Initialize scaler (online or fixed) - only if scaling is enabled
+        if self.use_scaling:
+            if use_online_scaling:
+                print(f"\n{'=' * 70}")
+                print("ONLINE ADAPTIVE SCALING ENABLED")
+                print(f"{'=' * 70}")
+                self.scaler = StreamingStandardScaler(
+                    n_features=n_inputs,
+                    warmup_samples=online_warmup_samples,
+                    adaptation_rate=online_adaptation_rate,
+                    use_pretrained=True,  # Start with pretrained stats
+                )
+                self.scaler.initialize_from_pretrained(pretrained_scaler)
+                print(f"  Warmup samples: {online_warmup_samples}")
+                print(f"  Adaptation rate: {online_adaptation_rate}")
+                print("  -> Scaler will adapt to distribution shifts in real-time")
+                print(f"{'=' * 70}\n")
+            else:
+                print(f"\n{'=' * 70}")
+                print("FIXED PRETRAINED SCALING")
+                print(f"{'=' * 70}")
+                self.scaler = pretrained_scaler
+                print("  Using fixed pretrained scaler (no adaptation)")
+                print(f"{'=' * 70}\n")
+        else:
+            print(f"\n{'=' * 70}")
+            print("SCALING DISABLED")
+            print(f"{'=' * 70}")
+            print("  Using raw feature values (no scaling)")
+            print("  Model was trained without scaling")
+            print(f"{'=' * 70}\n")
+            self.scaler = None
+
+        # Initialize model with detected n_inputs
         self.model = LSTMModel(
             n_inputs=n_inputs,
             n_outputs=n_outputs,
@@ -143,28 +351,14 @@ class DebugInference:
         ).to(self.device)
 
         # Load model weights
-        checkpoint = torch.load(
-            model_path, map_location=self.device, weights_only=False
-        )
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            self.model.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            self.model.load_state_dict(checkpoint)
-
+        self.model.load_state_dict(state_dict)
         self.model.eval()
 
         # Initialize sliding window buffer
         self.window_buffer = deque(maxlen=window_size)
 
-        # Initialize streaming high-pass filter for env channels
-        # ⚠️ CRITICAL: This MUST match the actual training data sample rate!
-        # Run the training notebook's sampling rate analysis cell to get the measured value
-        fs = 30.0  # Hz - Updated to match Arduino (33ms delay) and data collection (30 Hz target)
-        print(f"✓ Using sampling rate: {fs} Hz for high-pass filter")
-        self.highpass_filter = StreamingHighPassFilter(fs, cutoff=0.5, order=4)
-
         # Define neighbor relationships for spatial features (matching notebook)
-        self.neighbors = {1: [], 2: [3], 3: [2, 4], 4: [3]}
+        self.neighbors = {1: [2], 2: [1, 4], 3: [4], 4: [2, 3]}
 
         # Finger names for display
         self.finger_names = [
@@ -182,17 +376,26 @@ class DebugInference:
         # Reorder indices: [0, 5, 1, 2, 3, 4]
         self.prediction_reorder = [0, 5, 1, 2, 3, 4]
         print(
-            f"✓ Prediction reordering: model order [0,1,2,3,4,5] → hardware order {self.prediction_reorder}"
+            f"Prediction reordering: model order [0,1,2,3,4,5] -> hardware order {self.prediction_reorder}"
         )
 
         # Output smoothing (Exponential Moving Average)
         self.smoothing_alpha = 1.0  # 0.0 = max smoothing, 1.0 = no smoothing
         self.smoothed_output = None  # Will be initialized on first prediction
 
-        print(f"✓ Model loaded on {self.device}")
-        print(f"✓ Scaler loaded with {self.scaler.n_features_in_} features")
-        print(f"✓ Window size: {window_size}")
-        print(f"✓ Output smoothing alpha: {smoothing_alpha} (lower = smoother)")
+        print(f"OK - Model loaded on {self.device}")
+        if self.use_scaling:
+            # StreamingStandardScaler uses n_features, pretrained scaler uses n_features_in_
+            n_features = getattr(
+                self.scaler,
+                "n_features",
+                getattr(self.scaler, "n_features_in_", n_inputs),
+            )
+            print(f"OK - Scaler loaded with {n_features} features (WILL BE APPLIED)")
+        else:
+            print("OK - Scaler NOT applied (model trained without scaling)")
+        print(f"OK - Window size: {window_size}")
+        print(f"OK - Output smoothing alpha: {smoothing_alpha} (lower = smoother)")
 
     def compute_spatial_features(self, raw_values, env_values):
         """Compute spatial features exactly as in inference_streaming.py"""
@@ -217,17 +420,59 @@ class DebugInference:
 
         return raw_diffs, env_diffs
 
+    def compute_emg_features(self, signal_buffer):
+        """
+        Compute EMG features from a signal buffer (for streaming inference).
+
+        Features computed:
+        - RMS (Root Mean Square): Signal power/intensity
+        - MAV (Mean Absolute Value): Average amplitude
+        - ZC (Zero Crossings): Frequency content indicator
+        - WL (Waveform Length): Signal complexity
+
+        Args:
+            signal_buffer: Deque containing recent signal samples
+
+        Returns:
+            Array of 4 EMG features [RMS, MAV, ZC, WL]
+        """
+        if len(signal_buffer) < 2:
+            # Not enough data yet - return zeros
+            return np.zeros(4)
+
+        signal = np.array(signal_buffer)
+
+        # RMS: Root Mean Square (signal power)
+        rms = np.sqrt(np.mean(signal**2))
+
+        # MAV: Mean Absolute Value (average amplitude)
+        mav = np.mean(np.abs(signal))
+
+        # ZC: Zero Crossings (frequency content indicator)
+        # Count sign changes with small threshold to avoid noise
+        threshold = 0.01
+        zc = 0
+        for i in range(len(signal) - 1):
+            if abs(signal[i]) > threshold or abs(signal[i + 1]) > threshold:
+                if signal[i] * signal[i + 1] < 0:  # Sign change
+                    zc += 1
+
+        # WL: Waveform Length (signal complexity)
+        wl = np.sum(np.abs(np.diff(signal)))
+
+        return np.array([rms, mav, zc, wl])
+
     def process_sample(self, raw_sample):
         """
         Process a single incoming sample with true streaming behavior.
-        EXACTLY matches inference_streaming.py logic.
+        EXACTLY matches training configuration from checkpoint.
 
         Args:
             raw_sample: Array of [env0, raw0, env1, raw1, env2, raw2, env3, raw3]
                        All values are RAW (unfiltered) as they would come from sensors
 
         Returns:
-            Scaled feature vector ready for windowing
+            Feature vector (scaled if use_scaling=True, raw if use_scaling=False)
         """
         # Extract raw sensor values
         env_values_raw = raw_sample[
@@ -235,9 +480,13 @@ class DebugInference:
         ].copy()  # env0, env1, env2, env3 (raw from sensor)
         raw_values = raw_sample[1::2].copy()  # raw0, raw1, raw2, raw3 (unfiltered)
 
-        # Apply streaming high-pass filter to env values (causal, online filtering)
+        # Apply filter to env values ONLY if filter_type != 'none'
+        # This matches the training configuration
         env_values_filtered = np.array(
-            [self.highpass_filter.filter(env_values_raw[i], i) for i in range(4)]
+            [
+                self.filter.apply_streaming(env_values_raw[i], channel=i)
+                for i in range(4)
+            ]
         )
 
         # Compute spatial features using FILTERED env and UNFILTERED raw
@@ -251,13 +500,34 @@ class DebugInference:
             interleaved_sensors.append(env_values_filtered[i])
             interleaved_sensors.append(raw_values[i])
 
+        # Base features: env0, raw0, env1, raw1, env2, raw2, env3, raw3
+        # Spatial features: raw_diff1-4, env_diff1-4
         features = np.concatenate([interleaved_sensors, raw_diffs, env_diffs])
 
-        features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
+        # Add EMG features if the model uses them
+        if self.use_emg_features:
+            # Update raw signal buffers
+            for i in range(4):
+                self.raw_buffers[i].append(raw_values[i])
 
-        self.window_buffer.append(features_scaled)
+            # Compute EMG features for each channel
+            emg_features = []
+            for i in range(4):
+                channel_emg = self.compute_emg_features(self.raw_buffers[i])
+                emg_features.extend(channel_emg)  # 4 features per channel
 
-        return features_scaled
+            # Append EMG features (16 additional features: 4 features x 4 channels)
+            features = np.concatenate([features, np.array(emg_features)])
+
+        # Apply scaling ONLY if use_scaling is True (matching training)
+        if self.use_scaling:
+            features_scaled = self.scaler.transform(features.reshape(1, -1))[0]
+            self.window_buffer.append(features_scaled)
+            return features_scaled
+        else:
+            # No scaling - use raw features (as during training)
+            self.window_buffer.append(features)
+            return features
 
     def predict(self):
         """Make a prediction using the current sliding window buffer with smoothing."""
@@ -397,7 +667,7 @@ class DebugInference:
         print("\n" + "=" * 80)
         print("CSV REPLAY + HARDWARE CONTROL MODE")
         print("=" * 80)
-        print("Data source: martin6/test")
+        print("Data source: tobias/test")
         print(f"Hardware port: {port}")
         print(f"Starting at sample: {start_idx}")
         print(f"Processing {num_samples} samples")
@@ -632,7 +902,7 @@ class DebugInference:
         print("\n" + "=" * 80)
         print("SIMULATED REAL-TIME INFERENCE (Debug Mode)")
         print("=" * 80)
-        print("Data source: martin3/raw")
+        print("Data source: tobias/raw")
         print(f"Starting at sample: {start_idx}")
         print(f"Processing {num_samples} samples")
         print(f"Playback speed: {playback_speed}x")
@@ -1030,8 +1300,8 @@ def main():
     # Configuration (matching inference_streaming.py)
     # model_path = "training/notebooks/best_lstm_model.pth"
     # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
-    model_path = "data/martin6/best_lstm_model.pth"
-    scaler_path = "data/martin6/scaler_inputs_lstm.pkl"
+    model_path = "data/tobias/lstm_model_complete.pth"
+    scaler_path = "data/tobias/scaler_inputs_lstm.pkl"
 
     # ==============================================================================
     # MODE SELECTION: Choose what you want to debug
@@ -1041,10 +1311,10 @@ def main():
     # "csv+hardware" - Replay CSV data AND send predictions to actual hand (BEST FOR DEBUGGING!)
     # ==============================================================================
     # MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
-    MODE = "hardware"
+    MODE = "csv"
 
     # CSV Simulation Settings (for "csv" and "csv+hardware" modes)
-    data_dir = "data/martin6/test"
+    data_dir = "data/tobias/test"
     start_idx = 1000  # Skip initial samples for stability
     num_samples = 1000  # Number of samples to process
     playback_speed = (
