@@ -226,7 +226,7 @@ class DebugInference:
         self,
         model_path,
         scaler_path,
-        window_size=50,
+        window_size=30,
         device="cpu",
         smoothing_alpha=0.7,
         feature_window=10,
@@ -768,7 +768,9 @@ class DebugInference:
                     predictions_made += 1
 
                     # Convert to servo values [0, 1023]
-                    servo_values = ((prediction) * 1023).astype(int)
+                    servo_values = (
+                        (1 - np.round(prediction, decimals=0)) * 1023
+                    ).astype(int)
                     servo_values = np.clip(servo_values, 0, 1023)
 
                     if predictions_made == 1:
@@ -811,7 +813,7 @@ class DebugInference:
                                 lines_pred[i].set_data(indices, pred_array[:, i])
                                 axes[i].set_xlim(indices[0], indices[-1])
 
-                            plt.pause(0.001)  # Update plot
+                            plt.pause(0.000001)  # Update plot
 
                     # Display every 0.5 seconds
                     current_time = time.time()
@@ -984,7 +986,9 @@ class DebugInference:
                     predictions_made += 1
 
                     # Convert to servo values [0, 1023]
-                    servo_values = (prediction * 1023).astype(int)
+                    servo_values = (
+                        (1 - np.round(prediction, decimals=0)) * 1023
+                    ).astype(int)
                     servo_values = np.clip(servo_values, 0, 1023)
 
                     # Store for analysis
@@ -1008,7 +1012,7 @@ class DebugInference:
                                 lines_pred[i].set_data(indices, pred_array[:, i])
                                 axes[i].set_xlim(indices[0], indices[-1])
 
-                            plt.pause(0.001)  # Update plot
+                            plt.pause(0.0000001)  # Update plot
 
                     # Display every 0.5 seconds
                     current_time = time.time()
@@ -1088,6 +1092,7 @@ class DebugInference:
             baudrate: Serial port baud rate
             show_plot: Whether to show real-time plot (hand movements only, no ground truth)
         """
+        show_plot = False
         print("\n" + "=" * 80)
         print("HARDWARE DEBUG MODE - Real-Time Inference with Visualization")
         print("=" * 80)
@@ -1211,7 +1216,9 @@ class DebugInference:
                         sample_count += 1
 
                         # Convert predictions [0,1] to servo values [0,1023]
-                        servo_values = (prediction * 1023).astype(int)
+                        servo_values = (
+                            (1 - np.round(prediction, decimals=0)) * 1023
+                        ).astype(int)
                         servo_values = np.clip(servo_values, 0, 1023)
 
                         # Send servo commands to Arduino (CONTROL THE HAND!)
@@ -1234,7 +1241,7 @@ class DebugInference:
                                     lines_pred[i].set_data(indices, pred_array[:, i])
                                     axes[i].set_xlim(indices[0], indices[-1])
 
-                                plt.pause(0.001)  # Update plot
+                                plt.pause(0.0000001)  # Update plot
 
                         # Display every 0.5 seconds
                         current_time = time.time()
@@ -1311,7 +1318,7 @@ def main():
     # "csv+hardware" - Replay CSV data AND send predictions to actual hand (BEST FOR DEBUGGING!)
     # ==============================================================================
     # MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
-    MODE = "csv"
+    MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
 
     # CSV Simulation Settings (for "csv" and "csv+hardware" modes)
     data_dir = "data/tobias/test"

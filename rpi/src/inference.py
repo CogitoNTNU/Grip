@@ -390,7 +390,9 @@ class RealtimeInference:
                             predictions_made += 1
 
                             # Convert predictions [0,1] to servo values [0,1023]
-                            servo_values = (prediction * 1023).astype(int)
+                            servo_values = (
+                                (1 - np.round(prediction, decimals=0)) * 1023
+                            ).astype(int)
                             servo_values = np.clip(servo_values, 0, 1023)
 
                             # Send servo commands to Arduino (same as main.py)
@@ -451,7 +453,7 @@ class RealtimeInference:
 
 def main():
     # Configuration
-    model_path = "data/tobias/best_lstm_model.pth"
+    model_path = "data/tobias/lstm_model_complete.pth"
     # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
     # model_path = "data/tobias/best_lstm_model.pth"
     scaler_path = "data/tobias/scaler_inputs_lstm.pkl"
