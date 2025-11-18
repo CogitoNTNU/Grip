@@ -667,7 +667,7 @@ class DebugInference:
         print("\n" + "=" * 80)
         print("CSV REPLAY + HARDWARE CONTROL MODE")
         print("=" * 80)
-        print("Data source: tobias/test")
+        print("Data source: tobias2/test")
         print(f"Hardware port: {port}")
         print(f"Starting at sample: {start_idx}")
         print(f"Processing {num_samples} samples")
@@ -904,7 +904,7 @@ class DebugInference:
         print("\n" + "=" * 80)
         print("SIMULATED REAL-TIME INFERENCE (Debug Mode)")
         print("=" * 80)
-        print("Data source: tobias/raw")
+        print("Data source: tobias2/raw")
         print(f"Starting at sample: {start_idx}")
         print(f"Processing {num_samples} samples")
         print(f"Playback speed: {playback_speed}x")
@@ -1307,8 +1307,8 @@ def main():
     # Configuration (matching inference_streaming.py)
     # model_path = "training/notebooks/best_lstm_model.pth"
     # scaler_path = "training/notebooks/scaler_inputs_lstm.pkl"
-    model_path = "data/tobias/lstm_model_complete.pth"
-    scaler_path = "data/tobias/scaler_inputs_lstm.pkl"
+    model_path = "data/tobias2/lstm_model_complete.pth"
+    scaler_path = "data/tobias2/scaler_inputs_lstm.pkl"
 
     # ==============================================================================
     # MODE SELECTION: Choose what you want to debug
@@ -1318,10 +1318,10 @@ def main():
     # "csv+hardware" - Replay CSV data AND send predictions to actual hand (BEST FOR DEBUGGING!)
     # ==============================================================================
     # MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
-    MODE = "csv+hardware"  # <-- CHANGE THIS to switch modes
+    MODE = "hardware"  # <-- CHANGE THIS to switch modes
 
     # CSV Simulation Settings (for "csv" and "csv+hardware" modes)
-    data_dir = "data/tobias/test"
+    data_dir = "data/tobias2/test"
     start_idx = 1000  # Skip initial samples for stability
     num_samples = 1000  # Number of samples to process
     playback_speed = (
